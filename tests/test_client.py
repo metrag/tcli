@@ -113,7 +113,11 @@ def test_gives_up_after_attempts():
 
 
 def _settings(name="", contour=Contour.SANDBOX):
-    return Settings(invest_token="t.test", sandbox_account_name=name, contour=contour)
+    # Для SANDBOX используем sandbox_token, для LIVE - main_token
+    if contour == Contour.SANDBOX:
+        return Settings(sandbox_token="t.test", sandbox_account_name=name, contour=contour)
+    else:
+        return Settings(main_token="t.test", sandbox_account_name=name, contour=contour)
 
 
 def test_pick_single_account():
@@ -155,7 +159,7 @@ def test_pick_unknown_name():
 
 
 def test_requires_token():
-    sb = Broker(Settings(invest_token=""))
+    sb = Broker(Settings(sandbox_token="", main_token=""))
     with pytest.raises(SandboxError):
         sb.__enter__()
 

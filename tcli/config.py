@@ -1,4 +1,4 @@
-"""Конфигурация tcli: загрузка .env, токен, маскировка, контуры."""
+"""Конфигурация tcli: загрузка .env, токены, контуры."""
 
 from __future__ import annotations
 
@@ -20,11 +20,6 @@ class Contour(str, Enum):
     LIVE = "LIVE"
 
 
-class TokenMode(str, Enum):
-    MAIN = "main"
-    SANDBOX = "sandbox"
-
-
 def mask_token(token: str) -> str:
     """abcd***wxyz — первые 4 и последние 4 символа, середина скрыта."""
     if not token:
@@ -36,53 +31,45 @@ def mask_token(token: str) -> str:
 
 @dataclass
 class Settings:
-    invest_token: str = ""
-    sandbox_token: str = ""
+    sandbox_token: str = ""  # Для песочницы
+    main_token: str = ""  # Для боевого контура
     sandbox_account_name: str = ""
     contour: Contour = Contour.SANDBOX
-    token_mode: TokenMode = TokenMode.MAIN
     env_path: Path = field(default_factory=lambda: ENV_PATH)
 
     @classmethod
     def load(cls, env_path: Optional[Path] = None) -> Settings:
         path = env_path or ENV_PATH
         values = dotenv_values(path) if path.exists() else {}
-        main_token = (values.get("INVEST_TOKEN") or "").strip()
+
         sandbox_token = (values.get("INVEST_SANDBOX_TOKEN") or "").strip()
-        
+        main_token = (values.get("INVEST_TOKEN") or "").strip()
+
         contour_str = (values.get("TCLI_CONTOUR") or "SANDBOX").strip().upper()
         contour = Contour(contour_str) if contour_str in ("SANDBOX", "LIVE") else Contour.SANDBOX
-        
-        token_mode_str = (values.get("TCLI_TOKEN") or "main").strip().lower()
-        token_mode = TokenMode(token_mode_str) if token_mode_str in ("main", "sandbox") else TokenMode.MAIN
-        
-        # Активный токен: зависит от режима
-        active_token = sandbox_token if token_mode == TokenMode.SANDBOX else main_token
-        # Фолбэк: если основной пуст, берём sandbox (и наоборот)
-        if not active_token:
-            active_token = main_token or sandbox_token
-        
+
         return cls(
-            invest_token=active_token,
             sandbox_token=sandbox_token,
+            main_token=main_token,
             sandbox_account_name=(values.get("SANDBOX_ACCOUNT_NAME") or "").strip(),
             contour=contour,
-            token_mode=token_mode,
             env_path=path,
         )
 
     @property
+    def token(self) -> str:
+        """Активный токен в зависимости от контура."""
+        return self.sandbox_token if self.contour == Contour.SANDBOX else self.main_token
+
+    @property
     def enabled(self) -> bool:
-        return bool(self.invest_token)
+        return bool(self.token)
 
     def masked(self) -> str:
-        return mask_token(self.invest_token)
+        return mask_token(self.token)
 
     def contour_label(self) -> str:
         return self.contour.value
-
-    def token_mode_label(self) -> str:
-        return self.token_mode.value
 
 
 def set_env_value(key: str, value: str, env_path: Optional[Path] = None) -> None:

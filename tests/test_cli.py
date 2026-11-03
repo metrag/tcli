@@ -66,7 +66,7 @@ def test_reset_reports_unavailable():
 def test_check_fails_without_token(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "tcli.cli._settings",
-        lambda: Settings(invest_token="", env_path=tmp_path / ".env"),
+        lambda: Settings(sandbox_token="", main_token="", env_path=tmp_path / ".env"),
     )
     result = runner.invoke(app, ["check"])
     assert result.exit_code == 1
@@ -75,8 +75,8 @@ def test_check_fails_without_token(monkeypatch, tmp_path):
 
 def test_check_ok_with_stub(monkeypatch, tmp_path):
     env = tmp_path / ".env"
-    env.write_text("INVEST_TOKEN=stub-token\n")
-    monkeypatch.setattr("tcli.cli._settings", lambda: Settings(invest_token="stub-token", env_path=env))
+    env.write_text("INVEST_SANDBOX_TOKEN=stub-token\n")
+    monkeypatch.setattr("tcli.cli._settings", lambda: Settings(sandbox_token="stub-token", env_path=env))
     monkeypatch.setattr("tcli.cli._open_broker", lambda settings: FakeBroker())
     result = runner.invoke(app, ["check"])
     assert result.exit_code == 0, result.output
@@ -85,13 +85,13 @@ def test_check_ok_with_stub(monkeypatch, tmp_path):
 
 def test_check_api_failure(monkeypatch, tmp_path):
     env = tmp_path / ".env"
-    env.write_text("INVEST_TOKEN=stub-token\n")
+    env.write_text("INVEST_SANDBOX_TOKEN=stub-token\n")
 
     class BrokenBroker(FakeBroker):
         def accounts(self):
             raise RuntimeError("boom: network down")
 
-    monkeypatch.setattr("tcli.cli._settings", lambda: Settings(invest_token="stub-token", env_path=env))
+    monkeypatch.setattr("tcli.cli._settings", lambda: Settings(sandbox_token="stub-token", env_path=env))
     monkeypatch.setattr("tcli.cli._open_broker", lambda settings: BrokenBroker())
     result = runner.invoke(app, ["check"])
     assert result.exit_code == 1

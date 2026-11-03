@@ -13,7 +13,7 @@ from .client import (
     SandboxError,
     api_error_text,
 )
-from .config import Contour, Settings, TokenMode, set_env_value
+from .config import Contour, Settings, mask_token, set_env_value
 from .render import (
     console,
     fmt_money,
@@ -124,71 +124,40 @@ def check() -> None:
 @app.command()
 @_guard
 def change_mode(
-    contour: Optional[str] = typer.Argument(None, help="Контур: sandbox или live"),
-    token: Optional[str] = typer.Option(None, "--token", help="Режим токена: main или sandbox"),
+    contour: str = typer.Argument(..., help="Контур: sandbox или live"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение для LIVE"),
 ) -> None:
-    """Переключить контур и/или режим токена.
+    """Переключить контур (SANDBOX/LIVE).
 
     Примеры:
-        tcli change_mode sandbox
-        tcli change_mode live --yes
-        tcli change_mode token sandbox
+        tcli change-mode sandbox
+        tcli change-mode live --yes
     """
     settings = _settings()
     current_contour = settings.contour
-    current_token_mode = settings.token_mode
 
-    new_contour = current_contour
-    new_token_mode = current_token_mode
+    contour_lower = contour.strip().lower()
+    if contour_lower in ("sandbox", "sb"):
+        new_contour = Contour.SANDBOX
+    elif contour_lower in ("live", "prod", "production"):
+        if not yes:
+            console.print("[yellow]ВНИМАНИЕ:[/yellow] Переключение на LIVE контур")
+            console.print("Все операции будут выполняться с реальными деньгами!")
+            confirm = typer.prompt("Введите 'LIVE' для подтверждения")
+            if confirm != "LIVE":
+                console.print("[red]Отменено[/red]")
+                raise typer.Exit(1)
+        new_contour = Contour.LIVE
+    else:
+        _fail(f"неизвестный контур: {contour} (допустимо: sandbox, live)", code=2)
 
-    # Переключение контура
-    if contour:
-        contour_lower = contour.strip().lower()
-        if contour_lower in ("sandbox", "sb"):
-            new_contour = Contour.SANDBOX
-        elif contour_lower in ("live", "prod", "production"):
-            if not yes:
-                console.print("[yellow]ВНИМАНИЕ:[/yellow] Переключение на LIVE контур")
-                console.print("Все операции будут выполняться с реальными деньгами!")
-                confirm = typer.prompt("Введите 'LIVE' для подтверждения")
-                if confirm != "LIVE":
-                    console.print("[red]Отменено[/red]")
-                    raise typer.Exit(1)
-            new_contour = Contour.LIVE
-        else:
-            _fail(f"неизвестный контур: {contour} (допустимо: sandbox, live)", code=2)
-
-    # Переключение режима токена
-    if token:
-        token_lower = token.strip().lower()
-        if token_lower in ("main", "primary"):
-            new_token_mode = TokenMode.MAIN
-        elif token_lower in ("sandbox", "sb"):
-            new_token_mode = TokenMode.SANDBOX
-        else:
-            _fail(f"неизвестный режим токена: {token} (допустимо: main, sandbox)", code=2)
-
-    # Запись изменений
-    changed = False
     if new_contour != current_contour:
         set_env_value("TCLI_CONTOUR", new_contour.value)
         console.print(f"контур: {current_contour.value} → [green]{new_contour.value}[/green]")
-        changed = True
+        new_token = settings.main_token if new_contour == Contour.LIVE else settings.sandbox_token
+        console.print(f"токен: {settings.masked()} → {mask_token(new_token)}")
     else:
         console.print(f"контур: {current_contour.value} (без изменений)")
-
-    if new_token_mode != current_token_mode:
-        set_env_value("TCLI_TOKEN", new_token_mode.value)
-        console.print(
-            f"режим токена: {current_token_mode.value} → [green]{new_token_mode.value}[/green]"
-        )
-        changed = True
-    else:
-        console.print(f"режим токена: {current_token_mode.value} (без изменений)")
-
-    if not changed:
-        console.print("[dim]ничего не изменилось[/dim]")
 
 
 # -- Команды уровня счёта -------------------------------------------------

@@ -139,7 +139,7 @@ class Broker:
             raise SandboxError("токен не задан: заполните .env (см. .env.example)")
         
         contour = self._settings.contour
-        token = self._settings.invest_token
+        token = self._settings.token  # Активный токен зависит от контура
         
         if contour == Contour.SANDBOX:
             self._raw = SdkSandboxClient(token)
