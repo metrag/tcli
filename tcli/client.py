@@ -322,6 +322,22 @@ class Broker:
         except Exception as exc:
             raise TickerNotFoundError(f"инструмент по uid не найден: {uid}") from exc
 
+    def instrument_by_isin(self, isin: str) -> Any:
+        """Поиск инструмента по ISIN (через find_instrument и фильтрацию)."""
+        isin_upper = isin.strip().upper()
+        instruments = self.find_instrument(isin_upper)
+        for inst in instruments:
+            if getattr(inst, "isin", "") == isin_upper:
+                return inst
+        # Fallback: пробуем найти по части ISIN (первые 9 символов)
+        if len(isin_upper) >= 9:
+            partial = isin_upper[:9]
+            instruments = self.find_instrument(partial)
+            for inst in instruments:
+                if getattr(inst, "isin", "") == isin_upper:
+                    return inst
+        raise TickerNotFoundError(f"инструмент по ISIN не найден: {isin}") from None
+
     def find_instrument_smart(self, identifier: str) -> Any:
         """Универсальный поиск инструмента с автоопределением типа идентификатора.
         
