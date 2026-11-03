@@ -619,13 +619,31 @@ def candles(
 @app.command()
 @_guard
 def find(
-    query: str = typer.Argument(..., help="Поисковый запрос (тикер, название, ISIN)"),
+    query: str = typer.Argument(..., help="Поисковый запрос (тикер, название, ISIN, FIGI, UID)"),
 ) -> None:
     """Поиск инструментов."""
+    import re
+    
     settings = _settings()
     header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    # Определяем тип запроса
+    query_upper = query.strip().upper()
+    is_isin = len(query_upper) == 12 and re.match(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$", query_upper)
+    is_figi = query_upper.startswith("BBG") or (query_upper.startswith("TCS") and len(query_upper) == 12)
+    is_uid = query_upper.startswith("TCS") and len(query_upper) > 12
+    
     with _open_broker(settings) as br:
-        instruments = br.find_instrument(query)
+        # Если это структурированный ID (ISIN/FIGI/UID), используем умный поиск
+        if is_isin or is_figi or is_uid:
+            try:
+                inst = br.find_instrument_smart(query)
+                instruments = [inst]
+            except Exception:
+                instruments = []
+        else:
+            # Обычный текстовый поиск по тикеру/названию
+            instruments = br.find_instrument(query)
         
         if not instruments:
             console.print("инструменты не найдены")

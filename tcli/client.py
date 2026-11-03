@@ -327,7 +327,9 @@ class Broker:
         
         Поддерживает:
         - FIGI (формат BBG*)
-        - UID/TCS (внутренние ID Т-Банка, формат TCS* или длинные ID)
+        - Sandbox FIGI (формат TCS*, 12 символов — псевдо-FIGI песочницы)
+        - UID (внутренние ID Т-Банка, длинные ID 20+ символов)
+        - ISIN (12 символов: 2 буквы страны + 9 букв/цифр + 1 контрольная цифра)
         - Тикеры (всё остальное)
         """
         import re
@@ -338,7 +340,15 @@ class Broker:
         if identifier.startswith("BBG"):
             return self.instrument_by_figi(identifier)
         
-        # UID/TCS: начинается с TCS или содержит только буквы+цифры (типичный формат uid)
+        # Sandbox FIGI: начинается с TCS и ровно 12 символов (псевдо-FIGI песочницы)
+        if identifier.startswith("TCS") and len(identifier) == 12:
+            return self.instrument_by_figi(identifier)
+        
+        # ISIN: 12 символов, 2 буквы страны + 9 букв/цифр + 1 цифра (но НЕ TCS*)
+        if len(identifier) == 12 and re.match(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$", identifier):
+            return self.instrument_by_isin(identifier)
+        
+        # UID: TCS* длиннее 12 символов или длинные буквенно-цифровые ID (20+)
         if identifier.startswith("TCS") or re.match(r"^[A-Z0-9]{20,}$", identifier):
             return self.instrument_by_uid(identifier)
         
