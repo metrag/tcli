@@ -52,9 +52,14 @@ def detect_identifier_type(identifier: str) -> str:
     if identifier.startswith("TCS") and len(identifier) == 12:
         return "sandbox_figi"
     
-    # ISIN: 12 символов, 2 буквы страны + 9 букв/цифр + 1 цифра (но НЕ TCS*)
+    # ISIN: 12 символов, но нужно проверить что это действительно ISIN
+    # ISIN всегда начинается с 2 букв кода страны (ISO 3166-1 alpha-2)
+    # Не является ISIN если начинается с префиксов тикеров (FUT, OPT, SP, и т.д.)
     if len(identifier) == 12 and re.match(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$", identifier):
-        return "isin"
+        # Проверяем что это не префикс тикера
+        ticker_prefixes = ("FUT", "OPT", "SP", "PS", "ETF", "BOND", "SHARE")
+        if not any(identifier.startswith(prefix) for prefix in ticker_prefixes):
+            return "isin"
     
     # UID: TCS* длиннее 12 символов или длинные буквенно-цифровые ID (20+)
     if identifier.startswith("TCS") and len(identifier) > 12:
