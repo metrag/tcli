@@ -1,0 +1,12 @@
+# Шаг 1: рантайм-зависимости SDK + приложение + dev-инструменты.
+# Шаг 2 (отдельной командой, см. README): tinkoff-investments с --no-deps.
+grpcio>=1.59.3
+protobuf>=4.25.1,<5
+cachetools>=5.2.0
+python-dateutil>=2.8.2
+deprecation>=2.1.0
+typer>=0.12
+rich>=13
+python-dotenv>=1.0
+pytest>=8
+ruff>=0.8
