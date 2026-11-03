@@ -8,8 +8,8 @@ from tcli.config import Settings
 runner = CliRunner()
 
 
-class FakeSandbox:
-    """Стаб Sandbox для команд CLI (без сети)."""
+class FakeBroker:
+    """Стаб Broker для команд CLI (без сети)."""
 
     def __init__(self, accounts=None):
         self._accounts = accounts if accounts is not None else [_acc()]
@@ -77,7 +77,7 @@ def test_check_ok_with_stub(monkeypatch, tmp_path):
     env = tmp_path / ".env"
     env.write_text("INVEST_TOKEN=stub-token\n")
     monkeypatch.setattr("tcli.cli._settings", lambda: Settings(invest_token="stub-token", env_path=env))
-    monkeypatch.setattr("tcli.cli._open_sandbox", lambda settings: FakeSandbox())
+    monkeypatch.setattr("tcli.cli._open_broker", lambda settings: FakeBroker())
     result = runner.invoke(app, ["check"])
     assert result.exit_code == 0, result.output
     assert "check: OK" in result.output
@@ -87,12 +87,12 @@ def test_check_api_failure(monkeypatch, tmp_path):
     env = tmp_path / ".env"
     env.write_text("INVEST_TOKEN=stub-token\n")
 
-    class BrokenSandbox(FakeSandbox):
+    class BrokenBroker(FakeBroker):
         def accounts(self):
             raise RuntimeError("boom: network down")
 
     monkeypatch.setattr("tcli.cli._settings", lambda: Settings(invest_token="stub-token", env_path=env))
-    monkeypatch.setattr("tcli.cli._open_sandbox", lambda settings: BrokenSandbox())
+    monkeypatch.setattr("tcli.cli._open_broker", lambda settings: BrokenBroker())
     result = runner.invoke(app, ["check"])
     assert result.exit_code == 1
     assert "ПРОВАЛ" in result.output

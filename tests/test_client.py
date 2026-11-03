@@ -5,14 +5,14 @@ from tinkoff.invest.exceptions import RequestError, StatusCode
 
 from tcli.client import (
     AmbiguousAccountError,
+    Broker,
     NoAccountsError,
-    Sandbox,
     SandboxError,
     api_error_text,
     is_transient,
     with_retries,
 )
-from tcli.config import Settings
+from tcli.config import Contour, Settings
 
 
 def _account(acc_id="acc-1", name="Main", status="ACCOUNT_STATUS_OPEN"):
@@ -28,29 +28,38 @@ def _response(accounts):
     return SimpleNamespace(accounts=list(accounts))
 
 
-class FakeSandbox(Sandbox):
-    """Sandbox с подменённым SDK-клиентом (без сети)."""
+class FakeBroker(Broker):
+    """Broker с подменённым SDK-клиентом (без сети)."""
 
     def __init__(self, settings, accounts=(), fail_with=None):
-        factory = lambda token: self._make_client(accounts, fail_with)  # noqa: E731
-        super().__init__(settings, client_factory=factory)
+        super().__init__(settings)
+        self._accounts = list(accounts)
+        self._fail_with = list(fail_with or [])
+        self._calls = {"n": 0}
 
-    @staticmethod
-    def _make_client(accounts, fail_with):
-        calls = {"n": 0}
+    def _make_client(self):
+        calls = self._calls
+        accounts = self._accounts
+        fail_with = self._fail_with
 
         def get_accounts():
             calls["n"] += 1
-            if fail_with is not None and calls["n"] <= len(fail_with):
+            if fail_with and calls["n"] <= len(fail_with):
                 raise fail_with[calls["n"] - 1]
             return _response(accounts)
 
-        client = SimpleNamespace(users=SimpleNamespace(get_accounts=get_accounts))
-        # Client.__enter__ в SDK возвращает Services (объект-результат);
-        # стаб возвращает сам себя, __exit__ — владелец канала.
+        users = SimpleNamespace(get_accounts=get_accounts)
+        client = SimpleNamespace(users=users)
         client.__enter__ = lambda *a: client
         client.__exit__ = lambda *a: False
         return client
+
+    def __enter__(self):
+        if not self._settings.enabled:
+            raise SandboxError("токен не задан: заполните .env (см. .env.example)")
+        self._raw = self._make_client()
+        self._client = self._raw.__enter__()
+        return self
 
 
 # --- ретраи ---------------------------------------------------------------
@@ -103,49 +112,80 @@ def test_gives_up_after_attempts():
 # --- выбор счёта ----------------------------------------------------------
 
 
-def _settings(name=""):
-    return Settings(invest_token="t.test", sandbox_account_name=name)
+def _settings(name="", contour=Contour.SANDBOX):
+    return Settings(invest_token="t.test", sandbox_account_name=name, contour=contour)
 
 
 def test_pick_single_account():
-    sb = FakeSandbox(_settings(), accounts=[_account()])
+    sb = FakeBroker(_settings(), accounts=[_account()])
     with sb:
         account = sb.pick_account()
     assert account.id == "acc-1"
 
 
 def test_pick_by_name():
-    sb = FakeSandbox(_settings(name="second"), accounts=[_account("a1", "first"), _account("a2", "second")])
+    sb = FakeBroker(
+        _settings(name="second"),
+        accounts=[_account("a1", "first"), _account("a2", "second")],
+    )
     with sb:
         account = sb.pick_account()
     assert account.id == "a2"
 
 
 def test_pick_no_accounts():
-    sb = FakeSandbox(_settings(), accounts=[])
+    sb = FakeBroker(_settings(), accounts=[])
     with sb:
         with pytest.raises(NoAccountsError):
             sb.pick_account()
 
 
 def test_pick_ambiguous():
-    sb = FakeSandbox(_settings(), accounts=[_account("a1", "first"), _account("a2", "second")])
+    sb = FakeBroker(_settings(), accounts=[_account("a1", "first"), _account("a2", "second")])
     with sb:
         with pytest.raises(AmbiguousAccountError):
             sb.pick_account()
 
 
 def test_pick_unknown_name():
-    sb = FakeSandbox(_settings(name="ghost"), accounts=[_account("a1", "first")])
+    sb = FakeBroker(_settings(name="ghost"), accounts=[_account("a1", "first")])
     with sb:
         with pytest.raises(NoAccountsError, match="ghost"):
             sb.pick_account()
 
 
 def test_requires_token():
-    sb = Sandbox(Settings(invest_token=""))
+    sb = Broker(Settings(invest_token=""))
     with pytest.raises(SandboxError):
         sb.__enter__()
+
+
+# --- контуры --------------------------------------------------------------
+
+
+def test_live_guard_on_payin():
+    """payin доступен только в SANDBOX."""
+    from tcli.client import LiveUnsupportedError
+
+    sb = FakeBroker(_settings(contour=Contour.LIVE), accounts=[_account()])
+    with sb:
+        with pytest.raises(LiveUnsupportedError):
+            sb.payin("acc-1", 1000)
+
+
+def test_live_guard_on_create_account():
+    from tcli.client import LiveUnsupportedError
+
+    sb = FakeBroker(_settings(contour=Contour.LIVE), accounts=[_account()])
+    with sb:
+        with pytest.raises(LiveUnsupportedError):
+            sb.create_account("test")
+
+
+def test_contour_property():
+    sb = FakeBroker(_settings(contour=Contour.LIVE), accounts=[_account()])
+    assert sb.contour == Contour.LIVE
+    assert not sb.is_sandbox
 
 
 # --- ошибки и строки ------------------------------------------------------
@@ -157,14 +197,14 @@ def test_api_error_text_unauthenticated():
 
 
 def test_account_row():
-    row = Sandbox.account_row(_account())
+    row = Broker.account_row(_account())
     assert row["name"] == "Main"
     assert row["status"] == "OPEN"
     assert row["type"] == "TINKOFF"
 
 
 def test_payin_rejects_non_positive():
-    sb = FakeSandbox(_settings(), accounts=[_account()])
+    sb = FakeBroker(_settings(), accounts=[_account()])
     with sb:
         with pytest.raises(SandboxError):
             sb.payin("acc-1", 0)
@@ -182,7 +222,7 @@ def test_position_row_value():
         current_price=SimpleNamespace(units=310, nano=0),
         expected_yield=SimpleNamespace(units=100, nano=0),
     )
-    row = Sandbox.position_row(pos)
+    row = Broker.position_row(pos)
     assert row["ticker"] == "SBER"
     assert row["type"] == "SHARE"
     assert row["value"] == 3100.0

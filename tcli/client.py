@@ -1,34 +1,31 @@
-"""Песочница Tinkoff Invest API: обёртка над SandboxClient, ретраи, live-гард.
-
-Единственный доступный контур — SANDBOX: клиент подключается к sandbox-хосту
-(`SandboxClient`), боевой контур в модуле не используется нигде.
-"""
+"""Клиент Tinkoff Invest API: поддержка SANDBOX и LIVE контуров."""
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional
 
-from tinkoff.invest.exceptions import InvestError, UnauthenticatedError
+from tinkoff.invest import Client
+from tinkoff.invest.exceptions import InvestError, RequestError, UnauthenticatedError
 from tinkoff.invest.sandbox.client import SandboxClient as SdkSandboxClient
-from tinkoff.invest.schemas import InstrumentType, MoneyValue
+from tinkoff.invest.schemas import (
+    CandleInterval,
+    InstrumentType,
+    MoneyValue,
+    OrderDirection,
+    OrderType,
+    Quotation,
+)
 
-from .config import Settings
+from .config import Contour, Settings
 from .render import money_to_float
 
 _log = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
-# Транзиентные статусы gRPC: имеет смысл повторить запрос.
-RETRYABLE_CODES = {"UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED", "INTERNAL"}
-RETRY_ATTEMPTS = 3
-RETRY_BASE_DELAY = 0.5
-
 
 class SandboxError(RuntimeError):
-    """Ошибки уровня tcli (конфигурация, выбор счёта, ввод)."""
+    """Базовая ошибка tcli (конфигурация, выбор счёта, ввод)."""
 
 
 class NoAccountsError(SandboxError):
@@ -39,15 +36,28 @@ class AmbiguousAccountError(SandboxError):
     pass
 
 
+class LiveUnsupportedError(SandboxError):
+    """Операция недоступна на боевом контуре."""
+
+
+class TickerNotFoundError(SandboxError):
+    pass
+
+
+# Транзиентные статусы gRPC
+RETRYABLE_CODES = {"UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED", "INTERNAL"}
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 0.5
+
+
 def _code_name(exc: BaseException) -> str:
-    """Имя статуса gRPC/SDK из исключения: 'UNAVAILABLE', 'UNAUTHENTICATED'..."""
     code = getattr(exc, "code", None)
     if code is None:
         return ""
-    if callable(code):  # grpc.RpcError: .code() — метод
+    if callable(code):
         try:
             code = code()
-        except Exception:  # noqa: BLE001 — нечего извлекать
+        except Exception:
             return ""
     name = getattr(code, "name", None)
     if isinstance(name, str):
@@ -62,13 +72,12 @@ def is_transient(exc: BaseException) -> bool:
 
 
 def with_retries(
-    fn: Callable[[], T],
+    fn: Callable[[], Any],
     *,
     attempts: int = RETRY_ATTEMPTS,
     base_delay: float = RETRY_BASE_DELAY,
     sleep: Callable[[float], None] = time.sleep,
-) -> T:
-    """Повтор транзиентных ошибок с экспоненциальной паузой (0.5, 1.5, 4.5 c)."""
+) -> Any:
     last: Optional[BaseException] = None
     for attempt in range(attempts):
         try:
@@ -80,17 +89,18 @@ def with_retries(
             delay = base_delay * (3**attempt)
             _log.warning("транзиентная ошибка %s, повтор через %.1f с", _code_name(exc), delay)
             sleep(delay)
-    raise last if last else RuntimeError("with_retries: пустой вызов")  # pragma: no cover
+    raise last if last else RuntimeError("with_retries: пустой вызов")
 
 
 def api_error_text(exc: BaseException) -> str:
-    """Человекочитаемое описание ошибки API."""
     if isinstance(exc, UnauthenticatedError):
         return "авторизация: токен недействителен или отозван (40003) — обновите .env"
-    if isinstance(exc, InvestError):
+    if isinstance(exc, RequestError):
         details = getattr(exc, "details", "") or ""
         code = _code_name(exc)
         return f"ошибка API {code}: {details}".strip()
+    if isinstance(exc, InvestError):
+        return f"ошибка API: {exc}"
     return f"{type(exc).__name__}: {exc}"
 
 
@@ -105,26 +115,37 @@ def _enum_name(value: Any) -> str:
         "ACCOUNT_STATUS_",
         "INSTRUMENT_TYPE_",
         "ORDER_TYPE_",
+        "OPERATION_STATE_",
+        "OPERATION_TYPE_",
+        "CANDLE_INTERVAL_",
     ):
         if name.startswith(prefix):
             return name[len(prefix) :]
     return name
 
 
-class Sandbox:
-    """Контекстный менеджер песочницы: только sandbox-операции, с ретраями."""
+class Broker:
+    """Контекстный менеджер для Tinkoff Invest API: SANDBOX или LIVE."""
 
-    def __init__(self, settings: Settings, client_factory: Optional[Callable[[str], Any]] = None):
+    def __init__(self, settings: Settings):
         self._settings = settings
-        self._factory = client_factory or (lambda token: SdkSandboxClient(token))
-        self._raw: Any = None  # SDK Client (владелец канала)
-        self._client: Any = None  # Services из Client.__enter__()
+        self._raw: Any = None
+        self._client: Any = None
         self._tickers: dict[str, str] = {}
+        self._fights: dict[str, str] = {}
 
-    def __enter__(self) -> Sandbox:
+    def __enter__(self) -> Broker:
         if not self._settings.enabled:
             raise SandboxError("токен не задан: заполните .env (см. .env.example)")
-        self._raw = self._factory(self._settings.invest_token)
+        
+        contour = self._settings.contour
+        token = self._settings.invest_token
+        
+        if contour == Contour.SANDBOX:
+            self._raw = SdkSandboxClient(token)
+        else:
+            self._raw = Client(token)
+        
         self._client = self._raw.__enter__()
         return self
 
@@ -133,7 +154,15 @@ class Sandbox:
             return bool(self._raw.__exit__(exc_type, exc, tb))
         return False
 
-    # -- чтение ---------------------------------------------------------
+    @property
+    def contour(self) -> Contour:
+        return self._settings.contour
+
+    @property
+    def is_sandbox(self) -> bool:
+        return self._settings.contour == Contour.SANDBOX
+
+    # -- Счета ------------------------------------------------------------
 
     def accounts(self) -> list[Any]:
         resp = with_retries(lambda: self._client.users.get_accounts())
@@ -143,7 +172,7 @@ class Sandbox:
         accounts = self.accounts()
         if not accounts:
             raise NoAccountsError(
-                "нет счетов песочницы — откройте счёт в приложении Т-Банка (Инвестиции → Песочница)"
+                f"нет счетов — создайте счёт в {'песочнице' if self.is_sandbox else 'боевом контуре'}"
             )
         name = self._settings.sandbox_account_name
         if name:
@@ -159,34 +188,85 @@ class Sandbox:
             f"несколько счетов — задайте SANDBOX_ACCOUNT_NAME в .env; варианты: {available}"
         )
 
+    def create_account(self, name: str = "") -> Any:
+        if not self.is_sandbox:
+            raise LiveUnsupportedError("создание счёта доступно только в песочнице")
+        return with_retries(lambda: self._client.sandbox.open_sandbox_account(name=name))
+
+    def close_account(self, account_id: str) -> Any:
+        if not self.is_sandbox:
+            raise LiveUnsupportedError("закрытие счёта доступно только в песочнице")
+        return with_retries(
+            lambda: self._client.sandbox.close_sandbox_account(account_id=account_id)
+        )
+
+    # -- Портфель ---------------------------------------------------------
+
     def portfolio(self, account_id: str) -> Any:
-        return with_retries(lambda: self._client.operations.get_portfolio(account_id=account_id))
+        return with_retries(
+            lambda: self._client.operations.get_portfolio(account_id=account_id)
+        )
+
+    # -- Заявки -----------------------------------------------------------
 
     def orders(self, account_id: str) -> list[Any]:
         resp = with_retries(lambda: self._client.orders.get_orders(account_id=account_id))
         return list(resp.orders)
 
-    def ticker(self, figi: str) -> str:
-        """Тикер по figi (кэш; при сбое — сам figi)."""
-        if not figi:
-            return ""
-        if figi in self._tickers:
-            return self._tickers[figi]
-        try:
-            resp = with_retries(
-                lambda: self._client.instruments.get_instrument_by(
-                    id_type=InstrumentType.INSTRUMENT_TYPE_FIGI, id=figi
-                )
+    def place_order(
+        self,
+        account_id: str,
+        figi: str,
+        direction: OrderDirection,
+        quantity: int,
+        price: Optional[Quotation] = None,
+        order_type: OrderType = OrderType.ORDER_TYPE_LIMIT,
+    ) -> Any:
+        return with_retries(
+            lambda: self._client.orders.post_order(
+                account_id=account_id,
+                figi=figi,
+                direction=direction,
+                quantity=quantity,
+                price=price,
+                order_type=order_type,
             )
-            ticker = getattr(resp.instrument, "ticker", "") or figi
-        except Exception:  # noqa: BLE001 — резолв тикера не критичен
-            ticker = figi
-        self._tickers[figi] = ticker
-        return ticker
+        )
 
-    # -- операции песочницы ---------------------------------------------
+    def cancel_order(self, account_id: str, order_id: str) -> Any:
+        return with_retries(
+            lambda: self._client.orders.cancel_order(account_id=account_id, order_id=order_id)
+        )
+
+    # -- Операции ---------------------------------------------------------
+
+    def operations(
+        self,
+        account_id: str,
+        from_: Optional[Any] = None,
+        to: Optional[Any] = None,
+        state: Any = None,
+        figi: str = "",
+    ) -> list[Any]:
+        from tinkoff.invest.schemas import OperationState
+        
+        op_state = state if state is not None else OperationState.OPERATION_STATE_EXECUTED
+        resp = with_retries(
+            lambda: self._client.operations.get_operations(
+                account_id=account_id,
+                from_=from_,
+                to=to,
+                state=op_state,
+                figi=figi,
+            )
+        )
+        return list(resp.operations)
+
+    # -- Песочница: пополнение --------------------------------------------
 
     def payin(self, account_id: str, amount: float) -> Any:
+        if not self.is_sandbox:
+            raise LiveUnsupportedError("пополнение доступно только в песочнице")
         if amount <= 0:
             raise SandboxError("сумма должна быть больше 0")
         units = int(amount)
@@ -196,7 +276,78 @@ class Sandbox:
             lambda: self._client.sandbox.sandbox_pay_in(account_id=account_id, amount=money)
         )
 
-    # -- удобные представления ------------------------------------------
+    # -- Инструменты ------------------------------------------------------
+
+    def find_instrument(self, query: str) -> list[Any]:
+        resp = with_retries(lambda: self._client.instruments.find_instrument(query=query))
+        return list(resp.instruments)
+
+    def instrument_by_figi(self, figi: str) -> Any:
+        try:
+            resp = with_retries(
+                lambda: self._client.instruments.get_instrument_by(
+                    id_type=InstrumentType.INSTRUMENT_TYPE_FIGI, id=figi
+                )
+            )
+            return resp.instrument
+        except Exception as exc:
+            raise TickerNotFoundError(f"инструмент по FIGI не найден: {figi}") from exc
+
+    def instrument_by_ticker(self, ticker: str, class_code: str = "") -> Any:
+        try:
+            resp = with_retries(
+                lambda: self._client.instruments.get_instrument_by(
+                    id_type=InstrumentType.INSTRUMENT_TYPE_TICKER, id=ticker
+                )
+            )
+            return resp.instrument
+        except Exception as exc:
+            raise TickerNotFoundError(f"инструмент по тикеру не найден: {ticker}") from exc
+
+    def ticker(self, figi: str) -> str:
+        if not figi:
+            return ""
+        if figi in self._tickers:
+            return self._tickers[figi]
+        try:
+            instrument = self.instrument_by_figi(figi)
+            ticker = getattr(instrument, "ticker", "") or figi
+        except TickerNotFoundError:
+            ticker = figi
+        self._tickers[figi] = ticker
+        return ticker
+
+    def figi(self, ticker: str, class_code: str = "") -> str:
+        if not ticker:
+            return ""
+        if ticker in self._fights:
+            return self._fights[ticker]
+        instrument = self.instrument_by_ticker(ticker, class_code)
+        figi = getattr(instrument, "figi", "")
+        if not figi:
+            raise TickerNotFoundError(f"FIGI для {ticker} не найден")
+        self._fights[ticker] = figi
+        return figi
+
+    # -- Рыночные данные --------------------------------------------------
+
+    def last_prices(self, figi: list[str]) -> list[Any]:
+        resp = with_retries(
+            lambda: self._client.market_data.get_last_prices(figi=figi)
+        )
+        return list(resp.last_prices)
+
+    def candles(
+        self, figi: str, interval: CandleInterval, from_: Any, to: Any
+    ) -> list[Any]:
+        resp = with_retries(
+            lambda: self._client.market_data.get_candles(
+                figi=figi, interval=interval, from_=from_, to=to
+            )
+        )
+        return list(resp.candles)
+
+    # -- Представления ----------------------------------------------------
 
     @staticmethod
     def account_row(account: Any) -> dict:
@@ -257,4 +408,17 @@ class Sandbox:
             "lots": order.lots_executed,
             "price": price,
             "order_id": order.order_id,
+        }
+
+    @staticmethod
+    def operation_row(operation: Any, ticker: str) -> dict:
+        op_type = getattr(operation, "operation_type", None) or getattr(operation, "type", None)
+        return {
+            "date": getattr(operation, "date", None),
+            "type": _enum_name(op_type),
+            "ticker": ticker,
+            "quantity": getattr(operation, "quantity", None),
+            "price": getattr(operation, "price", None),
+            "amount": getattr(operation, "payment", None),
+            "currency": getattr(operation, "currency", ""),
         }

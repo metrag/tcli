@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 from rich.console import Console
 from rich.table import Table
@@ -47,14 +47,14 @@ def fmt_pct(value: Any) -> str:
     return f"{num:+.2f}%"
 
 
-def header_line(masked_token: str, env_exists: bool) -> None:
-    console.print(f"[bold]tcli[/bold] · контур [yellow]SANDBOX[/yellow] · токен {masked_token}")
+def header_line(masked_token: str, contour: str, env_exists: bool) -> None:
+    console.print(f"[bold]tcli[/bold] · контур [yellow]{contour}[/yellow] · токен {masked_token}")
     if not env_exists:
         console.print("[red].env не найден[/red]")
 
 
-def print_accounts(rows: Iterable[dict]) -> None:
-    table = Table(title="Счета (песочница)", show_lines=False)
+def print_accounts(rows: Iterable[dict], contour: str = "SANDBOX") -> None:
+    table = Table(title=f"Счета ({contour})", show_lines=False)
     table.add_column("Имя")
     table.add_column("ID")
     table.add_column("Тип")
@@ -69,8 +69,8 @@ def print_accounts(rows: Iterable[dict]) -> None:
     console.print(table)
 
 
-def print_summary(rows: Iterable[dict]) -> None:
-    table = Table(title="Портфель (песочница)")
+def print_summary(rows: Iterable[dict], contour: str = "SANDBOX") -> None:
+    table = Table(title=f"Портфель ({contour})")
     table.add_column("Счёт")
     table.add_column("Деньги", justify="right")
     table.add_column("Бумаги", justify="right")
@@ -130,6 +130,67 @@ def print_orders(rows: Iterable[dict], active: bool = True) -> None:
     console.print(table)
 
 
-def print_kv(pairs: Iterable[tuple[str, Optional[str]]]) -> None:
-    for key, value in pairs:
-        console.print(f"  [dim]{key}:[/dim] {value}")
+def print_operations(rows: Iterable[dict]) -> None:
+    table = Table(title="Операции")
+    table.add_column("Дата")
+    table.add_column("Тип")
+    table.add_column("Тикер")
+    table.add_column("Кол-во", justify="right")
+    table.add_column("Цена", justify="right")
+    table.add_column("Сумма", justify="right")
+    table.add_column("Валюта")
+    for row in rows:
+        date_str = ""
+        if row.get("date"):
+            date_str = str(row["date"])[:10]  # обрезаем до даты
+        table.add_row(
+            date_str,
+            str(row.get("type", "")),
+            str(row.get("ticker", "")),
+            str(row.get("quantity", "")),
+            fmt_money(row.get("price")),
+            fmt_money(row.get("amount")),
+            str(row.get("currency", "")),
+        )
+    console.print(table)
+
+
+def print_candles(rows: Iterable[dict], ticker: str, interval: str) -> None:
+    table = Table(title=f"Свечи {ticker} ({interval})")
+    table.add_column("Время")
+    table.add_column("Open", justify="right")
+    table.add_column("High", justify="right")
+    table.add_column("Low", justify="right")
+    table.add_column("Close", justify="right")
+    table.add_column("Volume", justify="right")
+    for row in rows:
+        time_str = ""
+        if row.get("time"):
+            time_str = str(row["time"])[:16]
+        table.add_row(
+            time_str,
+            fmt_money(row.get("open")),
+            fmt_money(row.get("high")),
+            fmt_money(row.get("low")),
+            fmt_money(row.get("close")),
+            str(row.get("volume", "")),
+        )
+    console.print(table)
+
+
+def print_instruments(rows: Iterable[dict], query: str) -> None:
+    table = Table(title=f"Инструменты (поиск: {query})")
+    table.add_column("Тикер")
+    table.add_column("FIGI")
+    table.add_column("Название")
+    table.add_column("Тип")
+    table.add_column("Класс")
+    for row in rows:
+        table.add_row(
+            str(row.get("ticker", "")),
+            str(row.get("figi", "")),
+            str(row.get("name", "")),
+            str(row.get("type", "")),
+            str(row.get("class", "")),
+        )
+    console.print(table)
