@@ -11,7 +11,7 @@ from tinkoff.invest.exceptions import InvestError, RequestError, Unauthenticated
 from tinkoff.invest.sandbox.client import SandboxClient as SdkSandboxClient
 from tinkoff.invest.schemas import (
     CandleInterval,
-    InstrumentType,
+    InstrumentIdType,
     MoneyValue,
     OrderDirection,
     OrderType,
@@ -286,7 +286,7 @@ class Broker:
         try:
             resp = with_retries(
                 lambda: self._client.instruments.get_instrument_by(
-                    id_type=InstrumentType.INSTRUMENT_TYPE_FIGI, id=figi
+                    id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI, id=figi
                 )
             )
             return resp.instrument
@@ -294,15 +294,56 @@ class Broker:
             raise TickerNotFoundError(f"инструмент по FIGI не найден: {figi}") from exc
 
     def instrument_by_ticker(self, ticker: str, class_code: str = "") -> Any:
+        # Сначала пробуем прямой поиск по тикеру
         try:
             resp = with_retries(
                 lambda: self._client.instruments.get_instrument_by(
-                    id_type=InstrumentType.INSTRUMENT_TYPE_TICKER, id=ticker
+                    id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER, id=ticker
+                )
+            )
+            return resp.instrument
+        except Exception:
+            # Fallback: ищем через find_instrument и фильтруем по точному совпадению тикера
+            instruments = self.find_instrument(ticker)
+            for inst in instruments:
+                if getattr(inst, "ticker", "") == ticker:
+                    return inst
+            raise TickerNotFoundError(f"инструмент по тикеру не найден: {ticker}") from None
+
+    def instrument_by_uid(self, uid: str) -> Any:
+        """Поиск инструмента по внутреннему ID (uid) Т-Банка."""
+        try:
+            resp = with_retries(
+                lambda: self._client.instruments.get_instrument_by(
+                    id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_UID, id=uid
                 )
             )
             return resp.instrument
         except Exception as exc:
-            raise TickerNotFoundError(f"инструмент по тикеру не найден: {ticker}") from exc
+            raise TickerNotFoundError(f"инструмент по uid не найден: {uid}") from exc
+
+    def find_instrument_smart(self, identifier: str) -> Any:
+        """Универсальный поиск инструмента с автоопределением типа идентификатора.
+        
+        Поддерживает:
+        - FIGI (формат BBG*)
+        - UID/TCS (внутренние ID Т-Банка, формат TCS* или длинные ID)
+        - Тикеры (всё остальное)
+        """
+        import re
+        
+        identifier = identifier.strip().upper()
+        
+        # FIGI: начинается с BBG
+        if identifier.startswith("BBG"):
+            return self.instrument_by_figi(identifier)
+        
+        # UID/TCS: начинается с TCS или содержит только буквы+цифры (типичный формат uid)
+        if identifier.startswith("TCS") or re.match(r"^[A-Z0-9]{20,}$", identifier):
+            return self.instrument_by_uid(identifier)
+        
+        # По умолчанию: пробуем как тикер
+        return self.instrument_by_ticker(identifier)
 
     def ticker(self, figi: str) -> str:
         if not figi:
@@ -318,11 +359,13 @@ class Broker:
         return ticker
 
     def figi(self, ticker: str, class_code: str = "") -> str:
+        """Получить FIGI по любому идентификатору (тикер, uid, figi)."""
         if not ticker:
             return ""
         if ticker in self._fights:
             return self._fights[ticker]
-        instrument = self.instrument_by_ticker(ticker, class_code)
+        # Используем универсальный поиск с автоопределением типа
+        instrument = self.find_instrument_smart(ticker)
         figi = getattr(instrument, "figi", "")
         if not figi:
             raise TickerNotFoundError(f"FIGI для {ticker} не найден")
