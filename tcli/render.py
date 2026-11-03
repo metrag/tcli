@@ -194,3 +194,45 @@ def print_instruments(rows: Iterable[dict], query: str) -> None:
             str(row.get("class", "")),
         )
     console.print(table)
+
+
+def print_watchlist(rows: Iterable[dict]) -> None:
+    """Вывод списка отслеживаемых инструментов с ценами."""
+    table = Table(title="Избранное (Watchlist)")
+    table.add_column("Тикер", style="cyan")
+    table.add_column("FIGI", style="dim")
+    table.add_column("Последняя цена", justify="right")
+    table.add_column("Изменение", justify="right")
+    for row in rows:
+        change = row.get("change", 0)
+        change_style = "green" if change >= 0 else "red"
+        change_str = f"{change:+.2f}%"
+        table.add_row(
+            str(row.get("ticker", "")),
+            str(row.get("figi", "")),
+            fmt_money(row.get("price")),
+            f"[{change_style}]{change_str}[/{change_style}]",
+        )
+    console.print(table)
+
+
+def print_instrument_info(info: dict) -> None:
+    """Вывод детальной информации об инструменте."""
+    console.print(f"\n[bold cyan]{info.get('name', 'N/A')}[/bold cyan] ({info.get('ticker', 'N/A')})")
+    console.print("=" * 60)
+    
+    rows = [
+        ("FIGI", info.get("figi", "N/A")),
+        ("ISIN", info.get("isin", "N/A")),
+        ("Тип", info.get("type", "N/A")),
+        ("Валюта", info.get("currency", "N/A")),
+        ("Лотность", str(info.get("lot", "N/A"))),
+        ("Биржа", info.get("exchange", "N/A")),
+        ("Класс", info.get("class_code", "N/A")),
+        ("Статус торгов", info.get("trading_status", "N/A")),
+    ]
+    
+    for label, value in rows:
+        console.print(f"  [bold]{label}:[/bold] {value}")
+    
+    console.print()

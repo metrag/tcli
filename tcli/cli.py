@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import json
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
 from typing import Any, Optional
 
 import typer
@@ -20,13 +23,20 @@ from .render import (
     header_line,
     print_accounts,
     print_candles,
+    print_instrument_info,
     print_instruments,
     print_operations,
     print_orders,
     print_positions,
     print_summary,
+    print_watchlist,
 )
 from .ssl import ENV_VAR, cert_status
+from .watchlist_utils import (
+    add_to_watchlist,
+    load_watchlist,
+    remove_from_watchlist,
+)
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -632,6 +642,218 @@ def find(
             })
         
         print_instruments(rows, query=query)
+
+
+# -- Новые команды: Export, Watchlist, Help, Account-Select, Info ------------
+
+
+@app.command()
+@_guard
+def export(
+    data_type: str = typer.Argument(..., help="Тип данных: positions, operations, orders"),
+    format: str = typer.Option("csv", "--format", "-f", help="Формат: csv, json"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Путь к файлу (по умолчанию stdout)"),
+    from_date: Optional[str] = typer.Option(None, "--from", help="Дата начала (YYYY-MM-DD) для operations"),
+    to_date: Optional[str] = typer.Option(None, "--to", help="Дата окончания (YYYY-MM-DD) для operations"),
+) -> None:
+    """Экспорт данных в CSV/JSON."""
+    if data_type not in ("positions", "operations", "orders"):
+        _fail(f"неизвестный тип данных: {data_type} (допустимо: positions, operations, orders)", code=2)
+    if format not in ("csv", "json"):
+        _fail(f"неизвестный формат: {format} (допустимо: csv, json)", code=2)
+    
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        rows = []
+        
+        if data_type == "positions":
+            portfolio = br.portfolio(account.id)
+            if not portfolio.positions:
+                console.print("позиций нет")
+                raise typer.Exit(0)
+            for p in portfolio.positions:
+                rows.append(Broker.position_row(p))
+        
+        elif data_type == "operations":
+            from_dt = None
+            to_dt = None
+            if from_date:
+                from_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if to_date:
+                to_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            
+            operations = br.operations(account_id=account.id, from_=from_dt, to=to_dt)
+            if not operations:
+                console.print("операций нет")
+                raise typer.Exit(0)
+            
+            for op in operations:
+                op_ticker = br.ticker(op.figi) if op.figi else ""
+                rows.append(Broker.operation_row(op, op_ticker))
+        
+        elif data_type == "orders":
+            orders = br.orders(account.id)
+            if not orders:
+                console.print("активных заявок нет")
+                raise typer.Exit(0)
+            for o in orders:
+                rows.append(Broker.order_row(o, br.ticker(o.figi)))
+        
+        # Экспорт в файл или stdout
+        import sys
+        out_stream = open(output, "w", encoding="utf-8") if output else sys.stdout
+        
+        try:
+            if format == "csv":
+                if rows:
+                    writer = csv.DictWriter(out_stream, fieldnames=rows[0].keys())
+                    writer.writeheader()
+                    writer.writerows(rows)
+            else:  # json
+                # Преобразуем все значения в строки для JSON
+                json_rows = []
+                for row in rows:
+                    json_row = {}
+                    for k, v in row.items():
+                        if hasattr(v, "units"):  # MoneyValue/Quotation
+                            json_row[k] = f"{v.units}.{abs(v.nano):09d}"
+                        else:
+                            json_row[k] = v
+                    json_rows.append(json_row)
+                json.dump(json_rows, out_stream, indent=2, ensure_ascii=False, default=str)
+        finally:
+            if output:
+                out_stream.close()
+        
+        if output:
+            console.print(f"[green]экспортировано {len(rows)} записей в {output}[/green]")
+        else:
+            console.print()  # пустая строка после вывода
+
+
+@app.command()
+@_guard
+def watchlist(
+    action: Optional[str] = typer.Argument(None, help="Действие: add, remove, list (по умолчанию list)"),
+    ticker: Optional[str] = typer.Argument(None, help="Тикер для add/remove"),
+) -> None:
+    """Управление списком отслеживаемых инструментов (избранное)."""
+    if action is None or action == "list":
+        # Показать текущие цены всех инструментов из watchlist
+        tickers = load_watchlist()
+        if not tickers:
+            console.print("watchlist пуст — добавьте инструменты: tcli watchlist add SBER")
+            raise typer.Exit(0)
+        
+        settings = _settings()
+        header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+        
+        with _open_broker(settings) as br:
+            rows = []
+            for t in tickers:
+                try:
+                    instrument = br.find_instrument_smart(t)
+                    figi = getattr(instrument, "figi", "")
+                    prices = br.last_prices([figi]) if figi else []
+                    price = prices[0].price if prices else None
+                    # Для простоты показываем 0% изменение (можно улучшить позже)
+                    rows.append({
+                        "ticker": t,
+                        "figi": figi,
+                        "price": price,
+                        "change": 0.0,
+                    })
+                except Exception:
+                    rows.append({
+                        "ticker": t,
+                        "figi": "не найден",
+                        "price": None,
+                        "change": 0.0,
+                    })
+            
+            print_watchlist(rows)
+    
+    elif action == "add":
+        if not ticker:
+            _fail("укажите тикер: tcli watchlist add SBER", code=2)
+        if add_to_watchlist(ticker):
+            console.print(f"[green]добавлено в watchlist:[/green] {ticker.upper()}")
+        else:
+            console.print(f"[yellow]уже в watchlist:[/yellow] {ticker.upper()}")
+    
+    elif action == "remove":
+        if not ticker:
+            _fail("укажите тикер: tcli watchlist remove SBER", code=2)
+        if remove_from_watchlist(ticker):
+            console.print(f"[green]удалено из watchlist:[/green] {ticker.upper()}")
+        else:
+            console.print(f"[yellow]не найдено в watchlist:[/yellow] {ticker.upper()}")
+    
+    else:
+        _fail(f"неизвестное действие: {action} (допустимо: add, remove, list)", code=2)
+
+
+@app.command()
+@_guard
+def account_select() -> None:
+    """Интерактивный выбор активного счёта."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        accounts = br.accounts()
+        if not accounts:
+            _fail("нет счетов", code=1)
+        
+        console.print("\n[bold]Доступные счета:[/bold]")
+        for i, account in enumerate(accounts, 1):
+            console.print(f"  {i}. {account.name or account.id} [dim]({account.id})[/dim]")
+        
+        console.print()
+        choice = typer.prompt("Выберите номер счёта", type=int)
+        
+        if choice < 1 or choice > len(accounts):
+            _fail(f"неверный номер: {choice} (допустимо 1-{len(accounts)})", code=2)
+        
+        selected = accounts[choice - 1]
+        account_name = selected.name or selected.id
+        
+        # Сохранить в .env
+        set_env_value("SANDBOX_ACCOUNT_NAME", account_name)
+        console.print(f"[green]выбран счёт:[/green] {account_name}")
+        console.print("[dim]сохранено в .env как SANDBOX_ACCOUNT_NAME[/dim]")
+
+
+@app.command()
+@_guard
+def info(
+    ticker: str = typer.Argument(..., help="Тикер, FIGI или UID инструмента"),
+) -> None:
+    """Детальная информация об инструменте."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        instrument = br.find_instrument_smart(ticker)
+        
+        # Извлечь информацию
+        info_dict = {
+            "name": getattr(instrument, "name", "N/A"),
+            "ticker": getattr(instrument, "ticker", "N/A"),
+            "figi": getattr(instrument, "figi", "N/A"),
+            "isin": getattr(instrument, "isin", "N/A"),
+            "type": getattr(instrument, "instrument_type", "N/A"),
+            "currency": getattr(instrument, "currency", "N/A"),
+            "lot": getattr(instrument, "lot", "N/A"),
+            "exchange": getattr(instrument, "exchange", "N/A"),
+            "class_code": getattr(instrument, "class_code", "N/A"),
+            "trading_status": getattr(instrument, "trading_status", "N/A"),
+        }
+        
+        print_instrument_info(info_dict)
 
 
 def main() -> None:
