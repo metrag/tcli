@@ -19,6 +19,11 @@ from tinkoff.invest.schemas import (
 )
 
 from .config import Contour, Settings
+from .id_utils import (
+    cache_identifier_type,
+    detect_identifier_type,
+    get_cached_type,
+)
 from .render import money_to_float
 
 _log = logging.getLogger(__name__)
@@ -347,29 +352,38 @@ class Broker:
         - UID (внутренние ID Т-Банка, длинные ID 20+ символов)
         - ISIN (12 символов: 2 буквы страны + 9 букв/цифр + 1 контрольная цифра)
         - Тикеры (всё остальное)
-        """
-        import re
         
+        Использует кэш для ускорения повторных запросов.
+        """
         identifier = identifier.strip().upper()
         
-        # FIGI: начинается с BBG
-        if identifier.startswith("BBG"):
-            return self.instrument_by_figi(identifier)
+        # Сначала проверяем кэш
+        cached_type = get_cached_type(identifier)
+        if cached_type:
+            id_type = cached_type
+        else:
+            # Определяем тип по формату
+            id_type = detect_identifier_type(identifier)
         
-        # Sandbox FIGI: начинается с TCS и ровно 12 символов (псевдо-FIGI песочницы)
-        if identifier.startswith("TCS") and len(identifier) == 12:
-            return self.instrument_by_figi(identifier)
-        
-        # ISIN: 12 символов, 2 буквы страны + 9 букв/цифр + 1 цифра (но НЕ TCS*)
-        if len(identifier) == 12 and re.match(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$", identifier):
-            return self.instrument_by_isin(identifier)
-        
-        # UID: TCS* длиннее 12 символов или длинные буквенно-цифровые ID (20+)
-        if identifier.startswith("TCS") or re.match(r"^[A-Z0-9]{20,}$", identifier):
-            return self.instrument_by_uid(identifier)
-        
-        # По умолчанию: пробуем как тикер
-        return self.instrument_by_ticker(identifier)
+        # Выполняем поиск по определённому типу
+        try:
+            if id_type == "figi":
+                result = self.instrument_by_figi(identifier)
+            elif id_type == "sandbox_figi":
+                result = self.instrument_by_figi(identifier)
+            elif id_type == "isin":
+                result = self.instrument_by_isin(identifier)
+            elif id_type == "uid":
+                result = self.instrument_by_uid(identifier)
+            else:  # ticker
+                result = self.instrument_by_ticker(identifier)
+            
+            # Сохраняем в кэш при успешном поиске
+            cache_identifier_type(identifier, id_type)
+            return result
+        except TickerNotFoundError:
+            # Если поиск не удал, пробуем другие методы
+            raise
 
     def ticker(self, figi: str) -> str:
         if not figi:

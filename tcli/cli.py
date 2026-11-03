@@ -17,6 +17,13 @@ from .client import (
     api_error_text,
 )
 from .config import Contour, Settings, mask_token, set_env_value
+from .id_utils import (
+    CACHE_PATH,
+    clear_cache,
+    detect_identifier_type,
+    get_cached_type,
+    load_cache,
+)
 from .render import (
     console,
     fmt_money,
@@ -872,6 +879,45 @@ def info(
         }
         
         print_instrument_info(info_dict)
+
+
+@app.command()
+@_guard
+def id_info(
+    identifier: str = typer.Argument(..., help="Идентификатор (тикер, FIGI, UID, ISIN)"),
+) -> None:
+    """Показать информацию о типе идентификатора."""
+    id_upper = identifier.strip().upper()
+    
+    # Определить тип по формату
+    detected_type = detect_identifier_type(id_upper)
+    
+    # Проверить наличие в кэше
+    cached_type = get_cached_type(id_upper)
+    
+    console.print(f"[bold]Идентификатор:[/bold] {id_upper}")
+    console.print(f"[bold]Определённый тип:[/bold] {detected_type}")
+    
+    if cached_type:
+        console.print(f"[bold]Кэшированный тип:[/bold] {cached_type} [green](используется)[/green]")
+    else:
+        console.print("[bold]Кэшированный тип:[/bold] [dim]не в кэше[/dim]")
+    
+    # Показать размер кэша
+    cache = load_cache()
+    if cache:
+        console.print(f"\n[bold]Кэш:[/bold] {len(cache)} записей в {CACHE_PATH}")
+        console.print("[dim]Используйте 'tcli id-clear-cache' для очистки кэша[/dim]")
+    else:
+        console.print("\n[bold]Кэш:[/bold] [dim]пуст[/dim]")
+
+
+@app.command()
+@_guard
+def id_clear_cache() -> None:
+    """Очистить кэш типов идентификаторов."""
+    clear_cache()
+    console.print("[green]кэш очищен[/green]")
 
 
 def main() -> None:
