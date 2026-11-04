@@ -345,4 +345,13 @@ def print_instrument_info(info: dict) -> None:
     for label, value in rows:
         console.print(f"  [bold]{label}:[/bold] {value}")
     
+    # Добавить текущую цену, если доступна
+    price = info.get("price")
+    price_currency = info.get("price_currency")
+    if price is not None:
+        currency_symbol = "₽" if price_currency == "RUB" else price_currency
+        console.print(f"  [bold]Текущая цена:[/bold] {price:,.2f} {currency_symbol}".replace(",", " "))
+    else:
+        console.print("  [bold]Текущая цена:[/bold] [dim]недоступно[/dim]")
+    
     console.print()

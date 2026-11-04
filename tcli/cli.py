@@ -1208,12 +1208,13 @@ def info(
     
     with _open_broker(settings) as br:
         instrument = br.find_instrument_smart(ticker)
+        figi = getattr(instrument, "figi", "")
         
         # Извлечь информацию
         info_dict = {
             "name": getattr(instrument, "name", "N/A"),
             "ticker": getattr(instrument, "ticker", "N/A"),
-            "figi": getattr(instrument, "figi", "N/A"),
+            "figi": figi,
             "isin": getattr(instrument, "isin", "N/A"),
             "type": getattr(instrument, "instrument_type", "N/A"),
             "currency": getattr(instrument, "currency", "N/A"),
@@ -1222,6 +1223,25 @@ def info(
             "class_code": getattr(instrument, "class_code", "N/A"),
             "trading_status": getattr(instrument, "trading_status", "N/A"),
         }
+        
+        # Получить текущую цену
+        if figi:
+            try:
+                prices = br.last_prices([figi])
+                if prices:
+                    price_val = money_to_float(prices[0].price)
+                    info_dict["price"] = price_val
+                    info_dict["price_currency"] = getattr(instrument, "currency", "")
+                else:
+                    info_dict["price"] = None
+                    info_dict["price_currency"] = None
+            except Exception:
+                # В песочнице рыночные данные могут быть недоступны
+                info_dict["price"] = None
+                info_dict["price_currency"] = None
+        else:
+            info_dict["price"] = None
+            info_dict["price_currency"] = None
         
         if json_output:
             console.print_json(data=info_dict)
