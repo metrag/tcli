@@ -31,22 +31,24 @@ _log = logging.getLogger(__name__)
 
 class SandboxError(RuntimeError):
     """Базовая ошибка tcli (конфигурация, выбор счёта, ввод)."""
+    exit_code = 1  # Общая ошибка
 
 
 class NoAccountsError(SandboxError):
-    pass
+    exit_code = 7  # Нет счетов
 
 
 class AmbiguousAccountError(SandboxError):
-    pass
+    exit_code = 8  # Неоднозначный счёт (несколько счетов)
 
 
 class LiveUnsupportedError(SandboxError):
     """Операция недоступна на боевом контуре."""
+    exit_code = 9  # Неподдерживаемая операция
 
 
 class TickerNotFoundError(SandboxError):
-    pass
+    exit_code = 4  # Инструмент не найден
 
 
 # Транзиентные статусы gRPC

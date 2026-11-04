@@ -73,7 +73,9 @@ def _guard(fn: Any) -> Any:
         except typer.Exit:
             raise
         except SandboxError as exc:
-            _fail(str(exc))
+            # Используем exit_code из исключения, если он есть
+            code = getattr(exc, 'exit_code', 1)
+            _fail(str(exc), code=code)
         except Exception as exc:  # noqa: BLE001 — верхний уровень CLI
             _fail(api_error_text(exc))
 
@@ -143,12 +145,14 @@ def check() -> None:
 def change_mode(
     contour: str = typer.Argument(..., help="Контур: sandbox или live"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение для LIVE"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
     """Переключить контур (SANDBOX/LIVE).
 
     Примеры:
         tcli change-mode sandbox
         tcli change-mode live --yes
+        tcli change-mode live --no-prompt
     """
     settings = _settings()
     current_contour = settings.contour
@@ -157,7 +161,7 @@ def change_mode(
     if contour_lower in ("sandbox", "sb"):
         new_contour = Contour.SANDBOX
     elif contour_lower in ("live", "prod", "production"):
-        if not yes:
+        if not yes and not no_prompt:
             console.print("[yellow]ВНИМАНИЕ:[/yellow] Переключение на LIVE контур")
             console.print("Все операции будут выполняться с реальными деньгами!")
             confirm = typer.prompt("Введите 'LIVE' для подтверждения")
@@ -182,7 +186,7 @@ def change_mode(
 
 @app.command()
 @_guard
-def status() -> None:
+def status(json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")) -> None:
     """Счета и сводка портфеля."""
     settings = _settings()
     header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
@@ -192,17 +196,27 @@ def status() -> None:
             _fail(
                 f"нет счетов — создайте счёт в {'песочнице' if br.is_sandbox else 'боевом контуре'}"
             )
-        print_accounts([Broker.account_row(a) for a in accounts], contour=br.contour)
-        rows = []
+        account_rows = [Broker.account_row(a) for a in accounts]
+        portfolio_rows = []
         for account in accounts:
             portfolio = br.portfolio(account.id)
-            rows.append(Broker.portfolio_row(account.name or account.id, portfolio))
-        print_summary(rows, contour=br.contour)
+            portfolio_rows.append(Broker.portfolio_row(account.name or account.id, portfolio))
+        
+        if json_output:
+            result = {
+                "contour": br.contour.value,
+                "accounts": account_rows,
+                "portfolio": portfolio_rows
+            }
+            console.print_json(data=result)
+        else:
+            print_accounts(account_rows, contour=br.contour)
+            print_summary(portfolio_rows, contour=br.contour)
 
 
 @app.command()
 @_guard
-def positions() -> None:
+def positions(json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")) -> None:
     """Позиции портфеля."""
     settings = _settings()
     header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
@@ -210,14 +224,21 @@ def positions() -> None:
         account = br.pick_account()
         portfolio = br.portfolio(account.id)
         if not portfolio.positions:
-            console.print("позиций нет")
+            if json_output:
+                console.print_json(data=[])
+            else:
+                console.print("позиций нет")
             raise typer.Exit(0)
-        print_positions([Broker.position_row(p) for p in portfolio.positions])
+        rows = [Broker.position_row(p) for p in portfolio.positions]
+        if json_output:
+            console.print_json(data=rows)
+        else:
+            print_positions(rows)
 
 
 @app.command()
 @_guard
-def orders() -> None:
+def orders(json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")) -> None:
     """Активные заявки."""
     settings = _settings()
     header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
@@ -225,10 +246,16 @@ def orders() -> None:
         account = br.pick_account()
         active = br.orders(account.id)
         if not active:
-            console.print("активных заявок нет")
+            if json_output:
+                console.print_json(data=[])
+            else:
+                console.print("активных заявок нет")
             raise typer.Exit(0)
         rows = [Broker.order_row(o, br.ticker(o.figi)) for o in active]
-        print_orders(rows, active=True)
+        if json_output:
+            console.print_json(data=rows)
+        else:
+            print_orders(rows, active=True)
 
 
 @app.command()
@@ -296,6 +323,7 @@ def account_new(
 def account_rm(
     account: str = typer.Argument(..., help="Имя или ID счёта для удаления"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
     """Удалить счёт (только песочница)."""
     settings = _settings()
@@ -311,7 +339,7 @@ def account_rm(
         
         target = matched[0]
         
-        if not yes:
+        if not yes and not no_prompt:
             console.print(f"[yellow]ВНИМАНИЕ:[/yellow] Удаление счёта {target.name or target.id}")
             console.print("Все позиции и заявки будут закрыты!")
             confirm = typer.prompt(f"Введите имя счёта для подтверждения: {target.name or target.id}")
@@ -375,6 +403,7 @@ def order_buy(
     lots: int = typer.Argument(..., help="Количество лотов"),
     price: Optional[float] = typer.Option(None, "--price", help="Лимитная цена (иначе рыночная)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
     """Купить инструмент."""
     if lots <= 0:
@@ -392,7 +421,7 @@ def order_buy(
         order_type = OrderType.ORDER_TYPE_LIMIT if price is not None else OrderType.ORDER_TYPE_MARKET
         price_str = fmt_money(price) if price is not None else "рыночная"
         
-        if not yes:
+        if not yes and not no_prompt:
             console.print(f"\n[bold]Покупка:[/bold] {ticker} × {lots} лот(ов)")
             console.print(f"  Счёт: {account.name or account.id}")
             console.print(f"  Цена: {price_str}")
@@ -431,6 +460,7 @@ def order_sell(
     lots: int = typer.Argument(..., help="Количество лотов"),
     price: Optional[float] = typer.Option(None, "--price", help="Лимитная цена (иначе рыночная)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
     """Продать инструмент."""
     if lots <= 0:
@@ -448,7 +478,7 @@ def order_sell(
         order_type = OrderType.ORDER_TYPE_LIMIT if price is not None else OrderType.ORDER_TYPE_MARKET
         price_str = fmt_money(price) if price is not None else "рыночная"
         
-        if not yes:
+        if not yes and not no_prompt:
             console.print(f"\n[bold]Продажа:[/bold] {ticker} × {lots} лот(ов)")
             console.print(f"  Счёт: {account.name or account.id}")
             console.print(f"  Цена: {price_str}")
@@ -546,6 +576,7 @@ def ops(
 @_guard
 def quote(
     ticker: str = typer.Argument(..., help="Тикер инструмента"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
 ) -> None:
     """Последние цены инструмента."""
     settings = _settings()
@@ -558,9 +589,18 @@ def quote(
             _fail(f"цены не найдены для {ticker}", code=1)
         
         last = prices[0]
-        console.print(f"\n[bold]{ticker}[/bold] (FIGI: {figi})")
-        console.print(f"  Последняя цена: {fmt_money(last.price)}")
-        console.print(f"  Время: {last.time}")
+        if json_output:
+            result = {
+                "ticker": ticker,
+                "figi": figi,
+                "price": str(last.price),
+                "time": str(last.time)
+            }
+            console.print_json(data=result)
+        else:
+            console.print(f"\n[bold]{ticker}[/bold] (FIGI: {figi})")
+            console.print(f"  Последняя цена: {fmt_money(last.price)}")
+            console.print(f"  Время: {last.time}")
 
 
 @app.command()
@@ -574,6 +614,7 @@ def candles(
         help="Интервал: 1min, 5min, 15min, 1hour, 1day",
     ),
     days: int = typer.Option(30, "--days", "-d", help="Количество дней истории"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
 ) -> None:
     """История свечей инструмента."""
     settings = _settings()
@@ -606,27 +647,40 @@ def candles(
         )
         
         if not candle_list:
-            console.print("свечей нет")
+            if json_output:
+                console.print_json(data=[])
+            else:
+                console.print("свечей нет")
             raise typer.Exit(0)
         
         rows = []
         for c in candle_list:
             rows.append({
-                "time": c.time,
-                "open": c.open,
-                "high": c.high,
-                "low": c.low,
-                "close": c.close,
+                "time": str(c.time),
+                "open": str(c.open),
+                "high": str(c.high),
+                "low": str(c.low),
+                "close": str(c.close),
                 "volume": c.volume,
             })
         
-        print_candles(rows, ticker=ticker, interval=interval)
+        if json_output:
+            result = {
+                "ticker": ticker,
+                "interval": interval,
+                "days": days,
+                "candles": rows
+            }
+            console.print_json(data=result)
+        else:
+            print_candles(rows, ticker=ticker, interval=interval)
 
 
 @app.command()
 @_guard
 def find(
     query: str = typer.Argument(..., help="Поисковый запрос (тикер, название, ISIN, FIGI, UID)"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате"),
 ) -> None:
     """Поиск инструментов."""
     import re
@@ -653,7 +707,10 @@ def find(
             instruments = br.find_instrument(query)
         
         if not instruments:
-            console.print("инструменты не найдены")
+            if json_output:
+                console.print_json(data=[])
+            else:
+                console.print("инструменты не найдены")
             raise typer.Exit(0)
         
         rows = []
@@ -666,7 +723,10 @@ def find(
                 "class": getattr(inst, "class_code", ""),
             })
         
-        print_instruments(rows, query=query)
+        if json_output:
+            console.print_json(data=rows)
+        else:
+            print_instruments(rows, query=query)
 
 
 # -- Новые команды: Export, Watchlist, Help, Account-Select, Info ------------
@@ -764,17 +824,22 @@ def export(
 def watchlist(
     action: Optional[str] = typer.Argument(None, help="Действие: add, remove, list (по умолчанию list)"),
     ticker: Optional[str] = typer.Argument(None, help="Тикер для add/remove"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате"),
 ) -> None:
     """Управление списком отслеживаемых инструментов (избранное)."""
     if action is None or action == "list":
         # Показать текущие цены всех инструментов из watchlist
         tickers = load_watchlist()
         if not tickers:
-            console.print("watchlist пуст — добавьте инструменты: tcli watchlist add SBER")
+            if json_output:
+                console.print_json(data=[])
+            else:
+                console.print("watchlist пуст — добавьте инструменты: tcli watchlist add SBER")
             raise typer.Exit(0)
         
         settings = _settings()
-        header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+        if not json_output:
+            header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
         
         with _open_broker(settings) as br:
             rows = []
@@ -788,7 +853,7 @@ def watchlist(
                     rows.append({
                         "ticker": t,
                         "figi": figi,
-                        "price": price,
+                        "price": str(price) if price else None,
                         "change": 0.0,
                     })
                 except Exception:
@@ -799,23 +864,34 @@ def watchlist(
                         "change": 0.0,
                     })
             
-            print_watchlist(rows)
+            if json_output:
+                console.print_json(data=rows)
+            else:
+                print_watchlist(rows)
     
     elif action == "add":
         if not ticker:
             _fail("укажите тикер: tcli watchlist add SBER", code=2)
-        if add_to_watchlist(ticker):
-            console.print(f"[green]добавлено в watchlist:[/green] {ticker.upper()}")
+        result = add_to_watchlist(ticker)
+        if json_output:
+            console.print_json(data={"action": "add", "ticker": ticker.upper(), "added": result})
         else:
-            console.print(f"[yellow]уже в watchlist:[/yellow] {ticker.upper()}")
+            if result:
+                console.print(f"[green]добавлено в watchlist:[/green] {ticker.upper()}")
+            else:
+                console.print(f"[yellow]уже в watchlist:[/yellow] {ticker.upper()}")
     
     elif action == "remove":
         if not ticker:
             _fail("укажите тикер: tcli watchlist remove SBER", code=2)
-        if remove_from_watchlist(ticker):
-            console.print(f"[green]удалено из watchlist:[/green] {ticker.upper()}")
+        result = remove_from_watchlist(ticker)
+        if json_output:
+            console.print_json(data={"action": "remove", "ticker": ticker.upper(), "removed": result})
         else:
-            console.print(f"[yellow]не найдено в watchlist:[/yellow] {ticker.upper()}")
+            if result:
+                console.print(f"[green]удалено из watchlist:[/green] {ticker.upper()}")
+            else:
+                console.print(f"[yellow]не найдено в watchlist:[/yellow] {ticker.upper()}")
     
     else:
         _fail(f"неизвестное действие: {action} (допустимо: add, remove, list)", code=2)
@@ -856,6 +932,7 @@ def account_select() -> None:
 @_guard
 def info(
     ticker: str = typer.Argument(..., help="Тикер, FIGI или UID инструмента"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате"),
 ) -> None:
     """Детальная информация об инструменте."""
     settings = _settings()
@@ -878,7 +955,10 @@ def info(
             "trading_status": getattr(instrument, "trading_status", "N/A"),
         }
         
-        print_instrument_info(info_dict)
+        if json_output:
+            console.print_json(data=info_dict)
+        else:
+            print_instrument_info(info_dict)
 
 
 @app.command()
