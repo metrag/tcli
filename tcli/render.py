@@ -247,6 +247,7 @@ def print_instruments_filtered(rows: Iterable[dict], filters: dict) -> None:
     table.add_column("Название")
     table.add_column("Тип")
     table.add_column("Лот", justify="right")
+    table.add_column("Цена", justify="right", style="green")
     table.add_column("Валюта")
     table.add_column("Мин. шаг", justify="right")
     table.add_column("Биржа")
@@ -261,12 +262,23 @@ def print_instruments_filtered(rows: Iterable[dict], filters: dict) -> None:
         table.add_column("Див. дох.", justify="right", style="green")
     
     for row in rows:
+        # Формируем цену с валютой
+        price_val = row.get("price")
+        currency_val = row.get("currency", "")
+        if price_val is not None:
+            # Определяем символ валюты
+            currency_symbol = "₽" if currency_val.upper() == "RUB" else currency_val
+            price_str = f"{price_val:,.2f} {currency_symbol}".replace(",", " ")
+        else:
+            price_str = "—"
+        
         row_data = [
             str(row.get("ticker", "")),
             str(row.get("figi", "")),
             str(row.get("name", "")),
             str(row.get("type", "")),
             str(row.get("lot", "")),
+            price_str,
             str(row.get("currency", "")),
             str(row.get("min_price_step", "")),
             str(row.get("exchange", "")),

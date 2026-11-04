@@ -808,20 +808,19 @@ def instruments(
                 console.print("инструменты не найдены")
             raise typer.Exit(0)
         
-        # Если есть фильтры по цене, получаем текущие цены
+        # Получаем текущие цены для всех инструментов
         prices_dict = {}
-        if price_min is not None or price_max is not None:
-            figi_list = [inst.figi for inst in all_instruments if hasattr(inst, 'figi')]
-            if figi_list:
-                try:
-                    last_prices = br.last_prices(figi_list)
-                    for lp in last_prices:
-                        if hasattr(lp, 'price'):
-                            price_val = money_to_float(lp.price)
-                            prices_dict[lp.figi] = price_val
-                except Exception:
-                    # Если не удалось получить цены, продолжаем без фильтра по цене
-                    pass
+        figi_list = [inst.figi for inst in all_instruments if hasattr(inst, 'figi')]
+        if figi_list:
+            try:
+                last_prices = br.last_prices(figi_list)
+                for lp in last_prices:
+                    if hasattr(lp, 'price'):
+                        price_val = money_to_float(lp.price)
+                        prices_dict[lp.figi] = price_val
+            except Exception:
+                # Если не удалось получить цены, продолжаем без цен
+                pass
         
         # Применяем фильтры
         filtered = []
@@ -863,8 +862,19 @@ def instruments(
                     continue
             
             # Фильтр по цене (если указаны мин/макс)
+            # Если указана валюта, фильтруем только инструменты с этой валютой
+            # Если валюта не указана, фильтруем только RUB
             if price_min is not None or price_max is not None:
                 inst_figi = getattr(inst, 'figi', '')
+                inst_currency_val = getattr(inst, 'currency', '') or ''
+                
+                # Определяем целевую валюту для фильтрации
+                target_currency = currency.upper() if currency else 'RUB'
+                
+                # Пропускаем инструменты не в целевой валюте
+                if inst_currency_val.upper() != target_currency:
+                    continue
+                
                 current_price = prices_dict.get(inst_figi)
                 if current_price is None:
                     continue
@@ -930,6 +940,9 @@ def instruments(
         # Формируем строки для вывода
         rows = []
         for inst in filtered:
+            inst_figi = getattr(inst, 'figi', '')
+            current_price = prices_dict.get(inst_figi)
+            
             row = {
                 "ticker": getattr(inst, "ticker", ""),
                 "figi": inst.figi,
@@ -937,6 +950,7 @@ def instruments(
                 "type": getattr(inst, "instrument_type", ""),
                 "lot": getattr(inst, "lot", 0),
                 "currency": getattr(inst, "currency", ""),
+                "price": current_price,
                 "min_price_step": money_to_float(getattr(inst, "min_price_increment", 0)),
                 "exchange": getattr(inst, "exchange", ""),
             }
