@@ -519,7 +519,7 @@ tcli candles SBER --json
       "close": "289.00",
       "volume": 1000000
     }
-  ]
+  ]tcli instruments --type share --price-min 100 --price-max 1000
 }
 ```
 

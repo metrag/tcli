@@ -1107,25 +1107,33 @@ def watchlist(
         with _open_broker(settings) as br:
             rows = []
             for t in tickers:
+                # Шаг 1: Поиск инструмента
+                figi = None
+                instrument = None
                 try:
                     instrument = br.find_instrument_smart(t)
                     figi = getattr(instrument, "figi", "")
-                    prices = br.last_prices([figi]) if figi else []
-                    price = prices[0].price if prices else None
-                    # Для простоты показываем 0% изменение (можно улучшить позже)
-                    rows.append({
-                        "ticker": t,
-                        "figi": figi,
-                        "price": str(price) if price else None,
-                        "change": 0.0,
-                    })
-                except Exception:
-                    rows.append({
-                        "ticker": t,
-                        "figi": "не найден",
-                        "price": None,
-                        "change": 0.0,
-                    })
+                except Exception as e:
+                    log_event("watchlist_instrument_error", ticker=t, error=str(e))
+                
+                # Шаг 2: Получение цены (если инструмент найден)
+                price = None
+                if figi:
+                    try:
+                        prices = br.last_prices([figi])
+                        if prices:
+                            price = money_to_float(prices[0].price)
+                            log_event("watchlist_price_retrieved", ticker=t, price=price)
+                    except Exception as e:
+                        log_event("watchlist_price_error", ticker=t, figi=figi, error=str(e))
+                
+                # Для простоты показываем 0% изменение (можно улучшить позже)
+                rows.append({
+                    "ticker": t,
+                    "figi": figi if figi else "не найден",
+                    "price": price,  # float или None
+                    "change": 0.0,
+                })
             
             if json_output:
                 console.print_json(data=rows)

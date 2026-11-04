@@ -317,10 +317,12 @@ def print_watchlist(rows: Iterable[dict]) -> None:
         change = row.get("change", 0)
         change_style = "green" if change >= 0 else "red"
         change_str = f"{change:+.2f}%"
+        price = row.get("price")
+        price_str = fmt_money(price) if price is not None else "недоступно"
         table.add_row(
             str(row.get("ticker", "")),
             str(row.get("figi", "")),
-            fmt_money(row.get("price")),
+            price_str,
             f"[{change_style}]{change_str}[/{change_style}]",
         )
     console.print(table)
