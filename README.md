@@ -1,42 +1,347 @@
-# tcli
+# tcli — CLI для Tinkoff Invest API
 
-CLI-инструмент для **Tinkoff Invest API**. Поддерживает работу с **песочницей (SANDBOX)** и **боевым контуром (LIVE)**.
+Полноценный CLI-инструмент для работы с **Tinkoff Invest API**. Поддержка песочницы (**SANDBOX**) и боевого контура (**LIVE**) с раздельными токенами.
 
-## Возможности
+## 📋 Все команды
 
-### Базовые команды
+| № | Команда | Описание |
+|---|---------|----------|
+| 1 | `check` | Самопроверка: `.env`, сертификат НУЦ, доступ к API |
+| 2 | `change-mode` | Переключение контура (SANDBOX ↔ LIVE) |
+| 3 | `status` | Счета и сводка портфеля |
+| 4 | `positions` | Позиции: тикер, количество, средняя/текущая цена, P&L |
+| 5 | `orders` | Активные заявки |
+| 6 | `payin` | Пополнить счёт песочницы (только SANDBOX) |
+| 7 | `reset` | Сбросить песочницу (устарело) |
+| 8 | `account-list` | Список всех счетов |
+| 9 | `account-new` | Создать новый счёт (только SANDBOX) |
+| 10 | `account-rm` | Удалить счёт (только SANDBOX) |
+| 11 | `account-show` | Показать детали счёта |
+| 12 | `account-select` | Интерактивный выбор активного счёта |
+| 13 | `order-buy` | Купить инструмент |
+| 14 | `order-sell` | Продать инструмент |
+| 15 | `order-cancel` | Отменить заявку |
+| 16 | `ops` | История операций |
+| 17 | `quote` | Текущая цена инструмента |
+| 18 | `candles` | История свечей |
+| 19 | `find` | Поиск инструментов |
+| 20 | `instruments` | Фильтрация инструментов по типу, цене, валюте и др. |
+| 21 | `info` | Детальная информация об инструменте |
+| 22 | `id-info` | Определить тип идентификатора (FIGI/UID/ISIN) |
+| 23 | `export` | Экспорт данных в CSV/JSON |
+| 24 | `watchlist` | Управление избранными инструментами |
 
-| Команда | Описание |
-| --- | --- |
-| `tcli check` | Самопроверка: `.env`, сертификат НУЦ, доступ к API |
-| `tcli change-mode sandbox` | Переключить на песочницу |
-| `tcli change-mode live` | Переключить на боевой контур (требует подтверждения) |
-| `tcli status` | Счета и сводка портфеля (деньги, бумаги, P&L) |
-| `tcli positions` | Позиции: тикер, количество, средняя/текущая цена, P&L |
-| `tcli orders` | Активные заявки |
-| `tcli payin <сумма>` | Пополнить счёт песочницы (рубли, только SANDBOX) |
+---
 
-### Управление счетами
+## 1. 🔍 `check` — Самопроверка
 
-| Команда | Описание |
-| --- | --- |
-| `tcli account-list` | Список всех счетов |
-| `tcli account-new [имя]` | Создать новый счёт (только SANDBOX) |
-| `tcli account-rm <имя\|id>` | Удалить счёт (только SANDBOX) |
-| `tcli account-show <имя\|id>` | Показать детали счёта |
+Проверяет корректность конфигурации: наличие `.env`, токен, сертификат НУЦ Минцифры, доступ к API.
 
-### Торговые операции
+```bash
+# Проверка конфигурации
+tcli check
+```
 
-| Команда | Описание |
-| --- | --- |
-| `tcli order-buy <тикер> <лоты> [--price <цена>]` | Купить инструмент |
-| `tcli order-sell <тикер> <лоты> [--price <цена>]` | Продать инструмент |
-| `tcli order-cancel <order_id>` | Отменить заявку |
+**Вывод:**
+```
+[1/4] .env (/home/user/tcli/.env): токен t.V6***sEHg
+[2/4] сертификат: /home/user/tcli/certs/russian-trusted-root.pem (1234 байт)
+[3/4] GRPC_DEFAULT_SSL_ROOTS_FILE_PATH: /home/user/tcli/certs/russian-trusted-root.pem
+[4/4] API (SANDBOX): OK, счетов: 2 (Main, Test)
+check: OK — всё готово
+```
 
-**`order-buy`** — покупка акций, облигаций, ETF или фьючерсов.
-Без `--price` выставляется рыночная заявка (исполнение по текущей цене биржи).
-С `--price` — лимитная заявка (исполнение только по указанной цене или лучше).
-Перед исполнением запрашивает подтверждение (отключается через `--yes`).
+---
+
+## 2. 🔄 `change-mode` — Переключение контура
+
+Переключает между SANDBOX и LIVE контурами. Токен выбирается автоматически:
+- **SANDBOX** → использует `INVEST_SANDBOX_TOKEN`
+- **LIVE** → использует `INVEST_TOKEN`
+
+**Параметры:**
+- `contour` (обязательный) — `sandbox` или `live`
+- `--yes`, `-y` — не запрашивать подтверждение для LIVE
+- `--no-prompt` — неинтерактивный режим (то же, что `--yes`)
+
+```bash
+# Переключить на песочницу
+tcli change-mode sandbox
+# контур: LIVE → SANDBOX
+# токен: t.V6***sEHg → t.sJ***tYyw
+
+# Переключить на боевой контур (с подтверждением)
+tcli change-mode live
+# ВНИМАНИЕ: Переключение на LIVE контур
+# Все операции будут выполняться с реальными деньгами!
+# Введите 'LIVE' для подтверждения: LIVE
+# контур: SANDBOX → LIVE
+# токен: t.sJ***tYyw → t.V6***sEHg
+
+# Переключить на LIVE без подтверждения (для скриптов)
+tcli change-mode live --yes
+tcli change-mode live --no-prompt
+```
+
+---
+
+## 3. 📊 `status` — Счета и сводка портфеля
+
+Показывает все счета и сводку портфеля: деньги, бумаги, итого, P&L.
+
+**Параметры:**
+- `--json` — вывод в JSON формате
+
+```bash
+# Человекочитаемый вывод
+tcli status
+
+# JSON вывод (для интеграции с торговым агентом)
+tcli status --json
+```
+
+**JSON вывод:**
+```json
+{
+  "contour": "SANDBOX",
+  "accounts": [
+    {"id": "acc-1", "name": "Main", "type": "TINKOFF", "status": "OPEN"}
+  ],
+  "portfolio": [
+    {
+      "account": "Main",
+      "cash": 100000.0,
+      "securities": 50000.0,
+      "total": 150000.0,
+      "pnl": 5000.0
+    }
+  ]
+}
+```
+
+---
+
+## 4. 💼 `positions` — Позиции портфеля
+
+Показывает все позиции: тикер, тип, количество, средняя/текущая цена, стоимость, P&L.
+
+**Параметры:**
+- `--json` — вывод в JSON формате
+
+```bash
+# Человекочитаемый вывод
+tcli positions
+
+# JSON вывод
+tcli positions --json
+```
+
+**JSON вывод:**
+```json
+[
+  {
+    "ticker": "SBER",
+    "type": "SHARE",
+    "quantity": 10,
+    "avg": "290.50",
+    "current": "300.00",
+    "value": 3000.0,
+    "pnl": 95.0
+  }
+]
+```
+
+---
+
+## 5. 📋 `orders` — Активные заявки
+
+Показывает все активные заявки: тикер, направление, статус, лоты, цена, ID.
+
+**Параметры:**
+- `--json` — вывод в JSON формате
+
+```bash
+tcli orders
+tcli orders --json
+```
+
+**JSON вывод:**
+```json
+[
+  {
+    "ticker": "SBER",
+    "direction": "BUY",
+    "status": "FILL",
+    "lots": 5,
+    "price": "290.00",
+    "order_id": "12345678-abcd-efgh"
+  }
+]
+```
+
+---
+
+## 6. 💰 `payin` — Пополнить счёт (только SANDBOX)
+
+Пополняет счёт песочницы на указанную сумму в рублях.
+
+**Параметры:**
+- `amount` (обязательный) — сумма пополнения в рублях
+
+```bash
+# Пополнить на 100000 рублей
+tcli payin 100000
+# пополнено на 100 000 ₽ · счёт Main · денег теперь: 200 000 ₽
+
+# Пополнить на 50000 рублей
+tcli payin 50000
+```
+
+---
+
+## 7. 🔄 `reset` — Сбросить песочницу
+
+**Устарело.** Метод `reset` отсутствует в `tinkoff-investments 0.2.0-beta117`. Используйте приложение Т-Банка для закрытия/открытия счёта.
+
+```bash
+tcli reset
+# Ошибка: метод reset отсутствует в tinkoff-investments 0.2.0-beta117
+```
+
+---
+
+## 8. 📋 `account-list` — Список всех счетов
+
+Показывает все доступные счета: имя, ID, тип, статус.
+
+```bash
+tcli account-list
+```
+
+**Вывод:**
+```
+Счета (SANDBOX)
+┌──────────┬──────────┬───────────┬────────┐
+│ Имя      │ ID       │ Тип       │ Статус │
+├──────────┼──────────┼───────────┼────────┤
+│ Main     │ acc-1    │ TINKOFF   │ OPEN   │
+│ Test     │ acc-2    │ TINKOFF   │ OPEN   │
+└──────────┴──────────┴───────────┴────────┘
+```
+
+---
+
+## 9. ➕ `account-new` — Создать новый счёт (только SANDBOX)
+
+Создаёт новый счёт в песочнице.
+
+**Параметры:**
+- `name` (опциональный) — имя нового счёта
+
+```bash
+# Создать счёт с именем
+tcli account-new "Основной"
+# счёт создан: 2001234567
+
+# Создать счёт без имени
+tcli account-new
+# счёт создан: 2007654321
+```
+
+---
+
+## 10. 🗑️ `account-rm` — Удалить счёт (только SANDBOX)
+
+Удаляет счёт в песочнице. Все позиции и заявки будут закрыты.
+
+**Параметры:**
+- `account` (обязательный) — имя или ID счёта для удаления
+- `--yes`, `-y` — не запрашивать подтверждение
+- `--no-prompt` — неинтерактивный режим
+
+```bash
+# Удалить счёт с подтверждением
+tcli account-rm Main
+# ВНИМАНИЕ: Удаление счёта Main
+# Все позиции и заявки будут закрыты!
+# Введите имя счёта для подтверждения: Main
+# счёт удалён: Main
+
+# Удалить без подтверждения (для скриптов)
+tcli account-rm Main --yes
+tcli account-rm Main --no-prompt
+
+# Удалить по ID
+tcli account-rm 2001234567
+```
+
+---
+
+## 11. 🔍 `account-show` — Показать детали счёта
+
+Показывает детальную информацию о счёте: ID, тип, статус, портфель, позиции.
+
+**Параметры:**
+- `account` (обязательный) — имя или ID счёта
+
+```bash
+# Показать детали по имени
+tcli account-show Main
+
+# Показать детали по ID
+tcli account-show 2001234567
+```
+
+**Вывод:**
+```
+Счёт: Main
+  ID: 2001234567
+  Тип: TINKOFF
+  Статус: OPEN
+
+Портфель:
+  Деньги: 100 000 ₽
+  Бумаги: 50 000 ₽
+  Итого: 150 000 ₽
+  P&L: 5 000 ₽
+
+Позиции (2):
+┌────────┬───────┬─────────┬───────────┬─────────┬──────────┬──────┐
+│ Тикер  │ Тип   │ Кол-во  │ Средняя   │ Текущая │ Стоимость│ P&L  │
+├────────┼───────┼─────────┼───────────┼─────────┼──────────┼──────┤
+│ SBER   │ SHARE │ 10      │ 290.50 ₽  │ 300.00 ₽│ 3 000 ₽  │ 95 ₽ │
+│ GAZP   │ SHARE │ 5       │ 150.00 ₽  │ 155.00 ₽│ 775 ₽    │ 25 ₽ │
+└────────┴───────┴─────────┴───────────┴─────────┴──────────┴──────┘
+```
+
+---
+
+## 12. ✅ `account-select` — Интерактивный выбор счёта
+
+Показывает список всех счетов и позволяет выбрать активный. Сохраняет выбор в `.env`.
+
+```bash
+tcli account-select
+# Доступные счета:
+#   1. Main (2001234567)
+#   2. Test (2007654321)
+# Выберите номер счёта: 1
+# выбран счёт: Main
+# сохранено в .env как SANDBOX_ACCOUNT_NAME
+```
+
+---
+
+## 13. 🛒 `order-buy` — Купить инструмент
+
+Покупает акции, облигации, ETF или фьючерсы.
+
+**Параметры:**
+- `ticker` (обязательный) — тикер инструмента (например, `SBER`)
+- `lots` (обязательный) — количество лотов
+- `--price` (опциональный) — лимитная цена (без неё — рыночная заявка)
+- `--yes`, `-y` — не запрашивать подтверждение
+- `--no-prompt` — неинтерактивный режим
 
 ```bash
 # Купить 1 лот Сбер по рыночной цене
@@ -44,10 +349,31 @@ tcli order-buy SBER 1
 
 # Купить 10 лотов Сбер лимитной заявкой по 290 ₽
 tcli order-buy SBER 10 --price 290
+
+# Купить без подтверждения (для скриптов)
+tcli order-buy SBER 1 --yes
+tcli order-buy SBER 1 --no-prompt --price 290
 ```
 
-**`order-sell`** — продажа инструмента из портфеля. Аналогично:
-рыночная или лимитная заявка, подтверждение перед исполнением.
+**Вывод:**
+```
+заявка выставлена
+  order_id: 12345678-abcd-efgh-1234-567890abcdef
+  figi: BBG004730N88
+```
+
+---
+
+## 14. 💸 `order-sell` — Продать инструмент
+
+Продаёт инструмент из портфеля.
+
+**Параметры:**
+- `ticker` (обязательный) — тикер инструмента
+- `lots` (обязательный) — количество лотов
+- `--price` (опциональный) — лимитная цена
+- `--yes`, `-y` — не запрашивать подтверждение
+- `--no-prompt` — неинтерактивный режим
 
 ```bash
 # Продать 5 лотов Сбер по рыночной цене
@@ -55,189 +381,540 @@ tcli order-sell SBER 5
 
 # Продать 5 лотов Сбер не дешевле 310 ₽
 tcli order-sell SBER 5 --price 310
+
+# Продать без подтверждения
+tcli order-sell SBER 5 --yes
 ```
 
-**`order-cancel`** — отмена ранее выставленной заявки по её `order_id`.
-ID заявки можно узнать через `tcli orders`.
+**Вывод:**
+```
+заявка выставлена
+  order_id: 87654321-dcba-hgfe-4321-0987654321fe
+  figi: BBG004730N88
+```
+
+---
+
+## 15. ❌ `order-cancel` — Отменить заявку
+
+Отменяет ранее выставленную заявку по её `order_id`.
+
+**Параметры:**
+- `order_id` (обязательный) — ID заявки (узнать через `tcli orders`)
 
 ```bash
 tcli order-cancel 12345678-abcd-efgh-1234-567890abcdef
+# заявка отменена: 12345678-abcd-efgh-1234-567890abcdef
 ```
 
-### Рыночные данные и история
+---
 
-| Команда | Описание |
-| --- | --- |
-| `tcli ops [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--ticker ТИКЕР]` | История операций |
-| `tcli quote <тикер>` | Текущая цена инструмента |
-| `tcli candles <тикер> [--interval 1min\|5min\|15min\|1hour\|1day] [--days N]` | История свечей |
-| `tcli find <запрос>` | Поиск инструментов по тикеру/названию/ISIN |
+## 16. 📜 `ops` — История операций
 
-**`ops`** — история операций по счёту: покупки, продажи, зачисление денег,
-дивиденды, купоны, удержания комиссий. Фильтрация по дате и тикеру.
+Показывает историю операций: покупки, продажи, зачисление денег, дивиденды, купоны, комиссии.
+
+**Параметры:**
+- `--from YYYY-MM-DD` — дата начала
+- `--to YYYY-MM-DD` — дата окончания
+- `--ticker ТИКЕР` — фильтр по тикеру
 
 ```bash
 # Все операции с начала года
 tcli ops --from 2026-01-01
 
+# Операции за ноябрь
+tcli ops --from 2026-11-01 --to 2026-11-30
+
 # Операции по Сберу за ноябрь
 tcli ops --from 2026-11-01 --to 2026-11-30 --ticker SBER
+
+# Все операции без фильтров
+tcli ops
 ```
 
-**`quote`** — последняя цена инструмента на бирже.
+**Вывод:**
+```
+Операции
+┌───────────┬──────────┬───────┬────────┬──────────┬──────────┬────────┐
+│ Дата      │ Тип      │ Тикер │ Кол-во │ Цена     │ Сумма    │ Валюта │
+├───────────┼──────────┼───────┼────────┼──────────┼──────────┼────────┤
+│ 2026-11-01│ BUY      │ SBER  │ 10     │ 290.50 ₽ │ 2 905 ₽  │ RUB    │
+│ 2026-11-05│ SELL     │ GAZP  │ 5      │ 155.00 ₽ │ 775 ₽    │ RUB    │
+│ 2026-11-10│ DIVIDEND │ SBER  │        │          │ 50 ₽     │ RUB    │
+└───────────┴──────────┴───────┴────────┴──────────┴──────────┴────────┘
+```
+
+---
+
+## 17. 💹 `quote` — Текущая цена инструмента
+
+Показывает последнюю цену инструмента на бирже.
+
+**Параметры:**
+- `ticker` (обязательный) — тикер, FIGI или UID инструмента
+- `--json` — вывод в JSON формате
 
 ```bash
+# По тикеру
 tcli quote SBER
 # SBER (FIGI: BBG004730N88)
 #   Последняя цена: 300.50 ₽
 #   Время: 2026-11-03 18:50:00
+
+# По FIGI
+tcli quote BBG004730N88
+
+# JSON вывод
+tcli quote SBER --json
 ```
 
-**`candles`** — исторические свечи OHLCV (Open/High/Low/Close/Volume)
-для технического анализа. Интервалы: 1min, 5min, 15min, 1hour, 1day.
+**JSON вывод:**
+```json
+{
+  "ticker": "SBER",
+  "figi": "BBG004730N88",
+  "price": "300.50",
+  "time": "2026-11-03 18:50:00"
+}
+```
+
+---
+
+## 18. 📈 `candles` — История свечей
+
+Показывает исторические свечи OHLCV (Open/High/Low/Close/Volume) для технического анализа.
+
+**Параметры:**
+- `ticker` (обязательный) — тикер инструмента
+- `--interval`, `-i` — интервал: `1min`, `5min`, `15min`, `1hour`, `1day` (по умолчанию `1day`)
+- `--days`, `-d` — количество дней истории (по умолчанию `30`)
+- `--json` — вывод в JSON формате
 
 ```bash
 # Дневные свечи за 90 дней
 tcli candles SBER --interval 1day --days 90
 
 # Часовые свечи за 5 дней
-tcli candles SBER --interval 1hour --days 5
+tcli candles SBER -i 1hour -d 5
 
 # Пятиминутные свечи за 1 день
-tcli candles SBER --interval 5min --days 1
+tcli candles SBER -i 5min -d 1
+
+# JSON вывод
+tcli candles SBER --json
 ```
 
-**`find`** — поиск инструментов по тикеру, названию или ISIN.
-Возвращает таблицу с тикером, FIGI, названием, типом и классом инструмента.
+**JSON вывод:**
+```json
+{
+  "ticker": "SBER",
+  "interval": "1day",
+  "days": 30,
+  "candles": [
+    {
+      "time": "2026-10-01 00:00:00",
+      "open": "285.00",
+      "high": "290.50",
+      "low": "283.00",
+      "close": "289.00",
+      "volume": 1000000
+    }
+  ]
+}
+```
+
+---
+
+## 19. 🔍 `find` — Поиск инструментов
+
+Ищет инструменты по тикеру, названию, ISIN, FIGI или UID. Автоматически определяет тип идентификатора.
+
+**Параметры:**
+- `query` (обязательный) — поисковый запрос (тикер, название, ISIN, FIGI, UID)
+- `--json` — вывод в JSON формате
 
 ```bash
-tcli find Сбер
+# Поиск по тикеру
 tcli find SBER
-tcli find RU000A0JSKN0
+tcli find Сбер
+
+# Поиск по ISIN
+tcli find RU000A0ZY7C3
+
+# Поиск по FIGI
+tcli find BBG004730N88
+
+# Поиск по UID (внутренний ID Т-Банка)
+tcli find TCS019029540
+
+# JSON вывод
+tcli find SBER --json
 ```
 
-### Дополнительные возможности
+**JSON вывод:**
+```json
+[
+  {
+    "ticker": "SBER",
+    "figi": "BBG004730N88",
+    "name": "Сбербанк",
+    "type": "share",
+    "class": "TQBR"
+  }
+]
+```
 
-| Команда | Описание |
-| --- | --- |
-| `tcli export <тип> [--format csv\|json] [--output файл]` | Экспорт данных в CSV/JSON |
-| `tcli watchlist [add\|remove\|list] [тикер]` | Управление избранными инструментами |
-| `tcli account-select` | Интерактивный выбор активного счёта |
-| `tcli info <тикер\|figi\|uid>` | Детальная информация об инструменте |
+---
 
-**`export`** — экспорт позиций, операций или заявок в CSV или JSON формат.
-Удобно для анализа в Excel или других инструментах.
+## 20. 🎯 `instruments` — Фильтрация инструментов
+
+Фильтрует инструменты по типу, цене, валюте, бирже и другим параметрам. Возвращает все доступные инструменты с возможностью детальной фильтрации.
+
+**Параметры:**
+- `--type`, `-t` — тип инструмента: `share`, `bond`, `etf`, `future`, `currency`
+- `--price-min` — минимальная цена
+- `--price-max` — максимальная цена
+- `--name` — поиск по названию (содержит)
+- `--ticker` — поиск по тикеру (содержит)
+- `--currency` — валюта: `RUB`, `USD`, `EUR`
+- `--exchange` — биржа: `MOEX`, `SPB`
+- `--lot-min` — минимальная лотность
+- `--lot-max` — максимальная лотность
+- `--available` — только доступные для торговли
+- `--maturity-from` — дата погашения от (YYYY-MM-DD, для облигаций)
+- `--maturity-to` — дата погашения до (YYYY-MM-DD, для облигаций)
+- `--coupon-min` — минимальный купон (%)
+- `--coupon-max` — максимальный купон (%)
+- `--market-cap-min` — минимальная капитализация
+- `--market-cap-max` — максимальная капитализация
+- `--management-fee-max` — максимальная комиссия ETF (%)
+- `--json` — вывод в JSON формате
 
 ```bash
-# Экспорт текущих позиций в CSV
+# Все акции
+tcli instruments --type share
+
+# Акции с ценой от 100 до 1000 ₽
+tcli instruments --type share --price-min 100 --price-max 1000
+
+# Облигации с погашением в 2025 году
+tcli instruments --type bond --maturity-from 2025-01-01 --maturity-to 2025-12-31
+
+# ETF на Мосбирже
+tcli instruments --type etf --exchange MOEX
+
+# Акции в рублях, доступные для торговли
+tcli instruments --type share --currency RUB --available
+
+# Поиск по названию
+tcli instruments --name "Сбер"
+
+# Поиск по тикеру
+tcli instruments --ticker "SBER"
+
+# Акции с лотностью от 1 до 10
+tcli instruments --type share --lot-min 1 --lot-max 10
+
+# Комбинация фильтров
+tcli instruments --type share --currency RUB --exchange MOEX --price-min 200 --available
+
+# JSON вывод
+tcli instruments --type share --json
+```
+
+**JSON вывод:**
+```json
+[
+  {
+    "ticker": "SBER",
+    "figi": "BBG004730N88",
+    "name": "Сбербанк",
+    "type": "share",
+    "lot": 10,
+    "currency": "RUB",
+    "min_price_step": 0.01,
+    "exchange": "MOEX"
+  }
+]
+```
+
+---
+
+## 21. ℹ️ `info` — Детальная информация об инструменте
+
+Показывает полную информацию об инструменте: название, FIGI, ISIN, тип, валюта, лотность, биржа, класс, статус торгов.
+
+**Параметры:**
+- `ticker` (обязательный) — тикер, FIGI или UID инструмента
+- `--json` — вывод в JSON формате
+
+```bash
+# По тикеру
+tcli info SBER
+
+# По FIGI
+tcli info BBG004730N88
+
+# По UID Т-Банка
+tcli info TCS019029540
+
+# По ISIN
+tcli info RU000A0ZY7C3
+
+# JSON вывод
+tcli info SBER --json
+```
+
+**Вывод:**
+```
+Инструмент: SBER
+  Название:    Сбербанк
+  FIGI:        BBG004730N88
+  ISIN:        RU000A0ZY7C3
+  Тип:         share
+  Валюта:      RUB
+  Лот:         10
+  Биржа:       MOEX
+  Класс:       TQBR
+  Статус:      NORMAL_TRADING
+```
+
+**JSON вывод:**
+```json
+{
+  "name": "Сбербанк",
+  "ticker": "SBER",
+  "figi": "BBG004730N88",
+  "isin": "RU000A0ZY7C3",
+  "type": "share",
+  "currency": "RUB",
+  "lot": 10,
+  "exchange": "MOEX",
+  "class_code": "TQBR",
+  "trading_status": "NORMAL_TRADING"
+}
+```
+
+---
+
+## 22. 🔎 `id-info` — Определить тип идентификатора
+
+Определяет тип идентификатора (FIGI, UID, ISIN, тикер) и показывает информацию из кэша.
+
+**Параметры:**
+- `identifier` (обязательный) — идентификатор (тикер, FIGI, UID, ISIN)
+
+```bash
+# Определить тип FIGI
+tcli id-info BBG004730N88
+# Идентификатор: BBG004730N88
+# Определённый тип: FIGI
+# Кэшированный тип: FIGI
+
+# Определить тип UID
+tcli id-info TCS019029540
+# Идентификатор: TCS019029540
+# Определённый тип: UID
+# Кэшированный тип: UID
+
+# Определить тип ISIN
+tcli id-info RU000A0ZY7C3
+# Идентификатор: RU000A0ZY7C3
+# Определённый тип: ISIN
+# Кэшированный тип: ISIN
+
+# Определить тип тикера
+tcli id-info SBER
+# Идентификатор: SBER
+# Определённый тип: TICKER
+# Кэшированный тип: (не найден в кэше)
+```
+
+---
+
+## 23. 📤 `export` — Экспорт данных в CSV/JSON
+
+Экспортирует позиции, операции или заявки в CSV или JSON формат.
+
+**Параметры:**
+- `data_type` (обязательный) — тип данных: `positions`, `operations`, `orders`
+- `--format`, `-f` — формат: `csv`, `json` (по умолчанию `csv`)
+- `--output`, `-o` — путь к файлу (по умолчанию stdout)
+- `--from YYYY-MM-DD` — дата начала (для `operations`)
+- `--to YYYY-MM-DD` — дата окончания (для `operations`)
+
+```bash
+# Экспорт позиций в CSV (stdout)
+tcli export positions
+
+# Экспорт позиций в CSV (файл)
 tcli export positions --format csv --output positions.csv
 
-# Экспорт операций за год в JSON
-tcli export operations --format json --from 2026-01-01 --output ops.json
+# Экспорт позиций в JSON
+tcli export positions --format json --output positions.json
+
+# Экспорт операций за год в CSV
+tcli export operations --from 2026-01-01 --output ops.csv
+
+# Экспорт операций за период в JSON
+tcli export operations --from 2026-01-01 --to 2026-11-30 --format json --output ops.json
 
 # Экспорт активных заявок в CSV
 tcli export orders --format csv --output orders.csv
 ```
 
-**`watchlist`** — управление списком отслеживаемых инструментов (избранное).
-Список хранится в `~/.tcli/watchlist.json` и сохраняется между сессиями.
+**CSV вывод:**
+```csv
+ticker,type,quantity,avg,current,value,pnl
+SBER,SHARE,10,290.50,300.00,3000.0,95.0
+GAZP,SHARE,5,150.00,155.00,775.0,25.0
+```
+
+---
+
+## 24. ⭐ `watchlist` — Управление избранными инструментами
+
+Управляет списком отслеживаемых инструментов (избранное). Список хранится в `~/.tcli/watchlist.json`.
+
+**Параметры:**
+- `action` (опциональный) — действие: `add`, `remove`, `list` (по умолчанию `list`)
+- `ticker` (опциональный) — тикер для `add`/`remove`
+- `--json` — вывод в JSON формате
 
 ```bash
 # Добавить инструмент в избранное
 tcli watchlist add SBER
+# добавлено в watchlist: SBER
+
 tcli watchlist add GAZP
+# добавлено в watchlist: GAZP
+
+tcli watchlist add LKOH
+# добавлено в watchlist: LKOH
 
 # Показать текущие цены всех избранных инструментов
 tcli watchlist list
+tcli watchlist  # то же самое
+
+# JSON вывод
+tcli watchlist --json
 
 # Удалить инструмент из избранного
 tcli watchlist remove SBER
+# удалено из watchlist: SBER
+
+# JSON вывод для add/remove
+tcli watchlist add SBER --json
+tcli watchlist remove SBER --json
 ```
 
-**`account-select`** — интерактивный выбор активного счёта.
-Показывает список всех доступных счетов и сохраняет выбор в `.env`.
-
-```bash
-tcli account-select
-# Доступные счета:
-#   1. Основной (2001234567)
-#   2. ИИС (2007654321)
-# Выберите номер счёта: 1
-# выбран счёт: Основной
-# сохранено в .env как SANDBOX_ACCOUNT_NAME
+**Вывод watchlist:**
+```
+Избранные инструменты (3)
+┌────────┬──────────────┬──────────┬────────┐
+│ Тикер  │ FIGI         │ Цена     │ Изм.   │
+├────────┼──────────────┼──────────┼────────┤
+│ SBER   │ BBG004730N88 │ 300.50 ₽ │ 0.00%  │
+│ GAZP   │ BBG004731X10 │ 155.00 ₽ │ 0.00%  │
+│ LKOH   │ BBG000VLTH35 │ 7500.00 ₽│ 0.00%  │
+└────────┴──────────────┴──────────┴────────┘
 ```
 
-**`info`** — детальная информация об инструменте.
-Поддерживает поиск по тикеру, FIGI или внутреннему UID Т-Банка.
-
-```bash
-# Информация по тикеру
-tcli info SBER
-
-# Информация по FIGI
-tcli info BBG004730N88
-
-# Информация по UID Т-Банка
-tcli info TCS019029540
+**JSON вывод:**
+```json
+[
+  {"ticker": "SBER", "figi": "BBG004730N88", "price": "300.50", "change": 0.0},
+  {"ticker": "GAZP", "figi": "BBG004731X10", "price": "155.00", "change": 0.0}
+]
 ```
 
-Показывает: название, FIGI, ISIN, тип инструмента, валюту, лотность, биржу, класс, статус торгов.
+---
 
-### Универсальный поиск инструментов
+## 🔧 Глобальные флаги
 
-Команды `tcli info`, `tcli quote`, `tcli candles` и другие поддерживают **универсальный поиск** через метод `find_instrument_smart()`, который автоматически определяет тип идентификатора:
+### `--json` — JSON вывод
 
-- **FIGI** (формат `BBG*`) — поиск через `instrument_by_figi()`
-- **UID/TCS** (внутренние ID Т-Банка, формат `TCS*` или длинные ID) — поиск через `instrument_by_uid()`
-- **Тикеры** (всё остальное) — поиск через `instrument_by_ticker()` с fallback через `find_instrument()`
+Большинство команд с выводом данных поддерживают флаг `--json` для структурированного вывода:
 
-Это означает что вы можете использовать любой из этих идентификаторов в командах, и tcli автоматически найдёт нужный инструмент.
+- `status --json`
+- `positions --json`
+- `orders --json`
+- `quote --json`
+- `candles --json`
+- `find --json`
+- `info --json`
+- `instruments --json`
+- `watchlist --json`
 
-## Режимы работы
+### `--no-prompt` — Неинтерактивный режим
 
-### Контуры (TCLI_CONTOUR)
+Команды с подтверждениями поддерживают флаг `--no-prompt` для работы в скриптах:
 
-- **SANDBOX** (по умолчанию) — работа с песочницей через `sandbox-invest-public-api.tinkoff.ru`
-- **LIVE** — работа с боевым контуром через `invest-public-api.tinkoff.ru`
+- `change-mode live --no-prompt`
+- `order-buy SBER 1 --no-prompt`
+- `order-sell SBER 1 --no-prompt`
+- `account-rm Main --no-prompt`
 
-Переключение требует ввода кода `LIVE` для подтверждения.
+### `--yes`, `-y` — Пропустить подтверждение
 
-### Токены
+Альтернатива `--no-prompt` для некоторых команд:
 
-- **SANDBOX** — используется `INVEST_SANDBOX_TOKEN` (только для песочницы)
-- **LIVE** — используется `INVEST_TOKEN` (только для боевого контура)
+- `change-mode live --yes`
+- `order-buy SBER 1 --yes`
+- `order-sell SBER 1 --yes`
+- `account-rm Main --yes`
 
-Токены не взаимозаменяемы — каждый работает только в своём контуре.
+---
 
-## Установка
+## 🔑 Архитектура токенов
+
+**ВАЖНО:** Токены не взаимозаменяемы — каждый работает только в своём контуре.
+
+- **SANDBOX** → использует `INVEST_SANDBOX_TOKEN` (свои счета песочницы)
+- **LIVE** → использует `INVEST_TOKEN` (боевые счета)
+
+При переключении контура через `tcli change-mode` токен выбирается автоматически.
+
+---
+
+## 📦 Установка
 
 Требуется Python 3.10+.
 
 ```bash
+# Создание виртуального окружения
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Шаг 1: рантайм-зависимости SDK + приложение
+# Установка зависимостей
 pip install -r requirements.txt
 
-# Шаг 2: сам SDK (пакет удалён с PyPI, ставится из git без его зависимостей —
-# они уже установлены на шаге 1)
+# Установка SDK (пакет удалён с PyPI, ставится из git)
 pip install --no-deps "tinkoff-investments @ git+https://github.com/RussianInvestments/invest-python.git@0.2.0-beta117"
 
 # Установка приложения (консольная команда tcli)
 pip install -e .
 ```
 
-## Настройка
+---
+
+## ⚙️ Настройка
 
 Скопируйте `.env.example` в `.env` и заполните:
 
-- `INVEST_TOKEN` — токен T-Invest (полный доступ).
-  Создаётся в [настройках Т-Инвестиций](https://invest.tbank.ru/settings/token).
-- `INVEST_SANDBOX_TOKEN` — альтернативный токен (используется если `TCLI_TOKEN=sandbox`).
-- `SANDBOX_ACCOUNT_NAME` — имя счёта, если счетов несколько (необязательно).
-- `TCLI_CONTOUR` — режим работы: `SANDBOX` или `LIVE` (по умолчанию `SANDBOX`).
-- `TCLI_TOKEN` — какой токен использовать: `main` или `sandbox` (по умолчанию `main`).
+```bash
+# Токен для LIVE контура (боевой)
+INVEST_TOKEN=your_live_token_here
+
+# Токен для SANDBOX контура (песочница)
+INVEST_SANDBOX_TOKEN=your_sandbox_token_here
+
+# Имя счёта (если счетов несколько)
+SANDBOX_ACCOUNT_NAME=Main
+
+# Контур (SANDBOX или LIVE)
+TCLI_CONTOUR=SANDBOX
+```
 
 Проверка:
 
@@ -245,23 +922,32 @@ pip install -e .
 tcli check
 ```
 
-## Сертификат НУЦ Минцифры
+---
 
-API Tinkoff использует цепочку сертификатов ГУ «НУЦ Минцифры России», которой нет
-в стандартном хранилище Mozilla. Без неё gRPC падает с `CERTIFICATE_VERIFY_FAILED`.
-Файл `certs/russian-trusted-root.pem` подкладывается автоматически при импорте
-пакета `tcli` (переменная `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`) — отдельных действий
-не требуется.
+## 🔐 Сертификат НУЦ Минцифры
 
-## Разработка
+API Tinkoff использует цепочку сертификатов ГУ «НУЦ Минцифры России», которой нет в стандартном хранилище Mozilla. Без неё gRPC падает с `CERTIFICATE_VERIFY_FAILED`.
+
+Файл `certs/russian-trusted-root.pem` подкладывается автоматически при импорте пакета `tcli` (переменная `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`) — отдельных действий не требуется.
+
+---
+
+## 🛠️ Разработка
 
 ```bash
-ruff check .          # линтер
-pytest                # тесты (без сети, на моках)
-python -m tcli --help # альтернативный запуск без установки скрипта
+# Линтер
+ruff check .
+
+# Тесты (без сети, на моках)
+pytest
+
+# Альтернативный запуск без установки скрипта
+python -m tcli --help
 ```
 
-## Структура
+---
+
+## 📁 Структура проекта
 
 ```
 tcli/
@@ -270,7 +956,8 @@ tcli/
 ├── config.py           # .env → Settings, контуры, маскировка токена
 ├── render.py           # таблицы rich (включая watchlist и info)
 ├── ssl.py              # подкладка корня НУЦ в gRPC
-└── watchlist_utils.py  # утилиты для работы с избранным (watchlist.json)
+├── watchlist_utils.py  # утилиты для работы с избранным (watchlist.json)
+└── id_utils.py         # утилиты для определения типов ID
 
 skills/
 ├── __init__.py         # экспорты всех функций
@@ -279,13 +966,21 @@ skills/
 ├── trading.py          # торговые операции (заявки)
 ├── account.py          # управление счетами
 └── analytics.py        # аналитика и инструменты
+
+tests/
+├── test_cli.py         # тесты CLI
+├── test_client.py      # тесты клиента
+├── test_config.py      # тесты конфигурации
+└── test_new_features.py # тесты новых функций
 ```
 
-## Skills модуль (Python API для торгового агента)
+---
 
-Модуль `skills/` предоставляет высокоуровневый Python API для взаимодействия с `tcli`. Все функции принимают Python-словари и возвращают структурированные данные, автоматически вызывая соответствующие команды `tcli` с флагами `--json` и `--no-prompt`.
+## 🤖 Skills модуль (Python API для торгового агента)
 
-### Установка и использование
+Модуль `skills/` предоставляет высокоуровневый Python API для взаимодействия с `tcli`. Все функции автоматически вызывают соответствующие команды `tcli` с флагами `--json` и `--no-prompt`.
+
+### Пример использования
 
 ```python
 from skills import get_quote, place_order, get_portfolio
@@ -304,186 +999,56 @@ result = place_order('SBER', 'buy', 1, price=285.50)
 print(result['order_id'])
 ```
 
-### Функции по категориям
+### Основные функции
 
-#### Market Data (рыночные данные)
+**Market Data:**
+- `get_quote(ticker)` — текущая цена
+- `get_candles(ticker, interval, days)` — история свечей
+- `get_portfolio()` — позиции портфеля
+- `get_status()` — счета и сводка
+- `get_orders()` — активные заявки
 
-```python
-from skills import get_quote, get_candles, get_portfolio, get_status, get_orders
+**Trading:**
+- `place_order(ticker, side, quantity, price)` — разместить заявку
+- `cancel_order(order_id)` — отменить заявку
+- `get_order_info(order_id)` — информация о заявке
 
-# Текущая цена инструмента
-quote = get_quote('SBER')
-# Возвращает: {'ticker': str, 'figi': str, 'price': str, 'time': str}
+**Account:**
+- `get_accounts()` — список счетов
+- `select_account(account_id)` — выбрать счёт
+- `get_current_account()` — текущий счёт
+- `get_account_info(account_id)` — информация о счёте
 
-# История свечей
-candles = get_candles('SBER', interval='1hour', days=7)
-# Возвращает: {'ticker': str, 'interval': str, 'days': int, 'candles': list[dict]}
-# Каждая свеча: {'time': str, 'open': str, 'high': str, 'low': str, 'close': str, 'volume': int}
+**Analytics:**
+- `search_instruments(query)` — поиск инструментов
+- `get_instrument_info(ticker)` — информация об инструменте
+- `add_to_watchlist(ticker)` — добавить в избранное
+- `remove_from_watchlist(ticker)` — удалить из избранного
+- `get_watchlist()` — список избранного
 
-# Позиции портфеля
-portfolio = get_portfolio()
-# Возвращает: {'positions': list[dict]}
-# Каждая позиция: {'ticker': str, 'figi': str, 'quantity': str, 'average_price': str, 
-#                   'current_price': str, 'value': str, 'pnl': str, 'pnl_percent': str}
+---
 
-# Статус счетов и сводка портфеля
-status = get_status()
-# Возвращает: {'contour': str, 'accounts': list[dict], 'portfolio': dict}
+## ⚠️ Ограничения
 
-# Активные заявки
-orders = get_orders()
-# Возвращает: {'orders': list[dict]}
-```
+- **Бэктестов, стратегий и LLM нет** — это осознанный минимум.
+- **В режиме LIVE** некоторые операции недоступны (создание/удаление счёта, пополнение) — они выполняются через приложение Т-Банка.
+- **В песочнице** FIGI может отображаться как внутренний UID (TCS*) — это особенность API песочницы.
+- **Метод `reset`** отсутствует в `tinkoff-investments 0.2.0-beta117` — используйте приложение Т-Банка для закрытия/открытия счёта.
 
-#### Trading (торговые операции)
+---
 
-```python
-from skills import place_order, cancel_order, get_order_info
+## 📝 Лицензия
 
-# Размещение заявки (лимитная)
-result = place_order('SBER', 'buy', 1, price=285.50)
-# Возвращает: {'order_id': str, 'figi': str, 'status': str}
+MIT
 
-# Размещение заявки (рыночная)
-result = place_order('SBER', 'sell', 1)  # без price
-# Возвращает: {'order_id': str, 'figi': str, 'status': str}
+---
 
-# Отмена заявки
-result = cancel_order('12345')
-# Возвращает: {'status': 'cancelled', 'order_id': str}
+## 🙏 Благодарности
 
-# Информация о заявке
-order = get_order_info('12345')
-# Возвращает: {'order_id': str, 'ticker': str, 'direction': str, 'quantity': str, 
-#               'price': str, 'status': str, 'created_at': str}
-```
+- [Tinkoff Invest API](https://github.com/Tinkoff/investAPI) — официальный API Т-Инвестиций
+- [invest-python](https://github.com/RussianInvestments/invest-python) — Python SDK для Tinkoff Invest API
 
-#### Account (управление счетами)
+---
 
-```python
-from skills import get_accounts, select_account, get_current_account, get_account_info
-
-# Список всех счетов
-accounts = get_accounts()
-# Возвращает: {'accounts': list[dict]}
-# Каждый счет: {'id': str, 'name': str, 'type': str, 'status': str}
-
-# Выбор активного счета
-result = select_account('account-name')
-# Возвращает: {'status': 'selected', 'account_id': str, 'account_name': str}
-
-# Текущий активный счет
-current = get_current_account()
-# Возвращает: {'account_id': str, 'account_name': str}
-
-# Информация о счете
-info = get_account_info('account-id')
-# Возвращает: {'id': str, 'name': str, 'type': str, 'status': str, 'portfolio': dict}
-```
-
-#### Analytics (аналитика и инструменты)
-
-```python
-from skills import (
-    search_instruments, get_instrument_info, 
-    get_instrument_by_figi, get_instrument_by_isin,
-    search_by_type, get_watchlist, 
-    add_to_watchlist, remove_from_watchlist
-)
-
-# Поиск инструментов
-results = search_instruments('SBER')
-# Возвращает: {'instruments': list[dict]}
-# Каждый инструмент: {'ticker': str, 'figi': str, 'name': str, 'type': str, 'class_code': str}
-
-# Информация об инструменте
-info = get_instrument_info('SBER')
-# Возвращает: {'ticker': str, 'figi': str, 'name': str, 'isin': str, 
-#               'lot': int, 'currency': str, 'type': str, 'exchange': str}
-
-# Поиск по FIGI
-info = get_instrument_by_figi('BBG004730N88')
-# Возвращает: {'ticker': str, 'figi': str, 'name': str, ...}
-
-# Поиск по ISIN
-info = get_instrument_by_isin('RU000A0ZY7C3')
-# Возвращает: {'ticker': str, 'figi': str, 'name': str, ...}
-
-# Поиск по типу инструмента
-results = search_by_type('share')
-# Возвращает: {'instruments': list[dict]}
-
-# Список отслеживаемых инструментов
-watchlist = get_watchlist()
-# Возвращает: {'watchlist': list[dict]}
-# Каждый элемент: {'ticker': str, 'figi': str, 'added_at': str}
-
-# Добавить в watchlist
-result = add_to_watchlist('SBER')
-# Возвращает: {'status': 'added', 'ticker': str}
-
-# Удалить из watchlist
-result = remove_from_watchlist('SBER')
-# Возвращает: {'status': 'removed', 'ticker': str}
-```
-
-### Обработка ошибок
-
-Все функции могут выбрасывать исключение `TcliError` при ошибке выполнения команды:
-
-```python
-from skills import get_quote
-from skills.base import TcliError
-
-try:
-    quote = get_quote('INVALID_TICKER')
-except TcliError as e:
-    print(f"Ошибка: {e.message}")
-    print(f"Код ошибки: {e.exit_code}")
-```
-
-### Особенности реализации
-
-- Все функции автоматически добавляют флаги `--json` и `--no-prompt` к командам
-- Таймаут выполнения: 30 секунд
-- Работает только в неинтерактивном режиме (без подтверждений)
-- Возвращает только структурированные данные (JSON)
-- Все цены и суммы возвращаются как строки (для точности)
-
-### Интеграция с торговым агентом
-
-Модуль `skills/` разработан для интеграции с торговым агентом. Все функции:
-
-1. **Детерминированы** — одинаковые входные данные дают одинаковый результат
-2. **Безопасны** — требуют явного подтверждения только для опасных операций
-3. **Структурированы** — возвращают Python-словари вместо текста
-4. **Логируются** — все операции записываются в структурированные JSON логи
-
-Пример полного торгового сценария:
-
-```python
-from skills import get_quote, place_order, get_portfolio
-
-# Анализ
-quote = get_quote('SBER')
-current_price = float(quote['price'])
-
-# Торговое решение (упрощённо)
-if current_price < 280.0:
-    # Покупка
-    result = place_order('SBER', 'buy', 1, price=279.50)
-    print(f"Заявка размещена: {result['order_id']}")
-
-# Проверка портфеля
-portfolio = get_portfolio()
-for pos in portfolio['positions']:
-    pnl_percent = float(pos['pnl_percent'])
-    if pnl_percent > 10.0:
-        print(f"{pos['ticker']}: прибыль {pnl_percent}%")
-```
-
-## Ограничения
-
-- Бэктестов, стратегий и LLM нет — это осознанный минимум.
-- В режиме LIVE некоторые операции недоступны (создание/удаление счёта, пополнение) — они выполняются через приложение Т-Банка.
-- В песочнице FIGI может отображаться как внутренний UID (TCS*) — это особенность API песочницы.
+**Версия:** 1.0.0  
+**Последнее обновление:** Ноябрь 2026
