@@ -28,6 +28,7 @@ from .render import (
     console,
     fmt_money,
     header_line,
+    log_event,
     print_accounts,
     print_candles,
     print_instrument_info,
@@ -177,6 +178,7 @@ def change_mode(
         console.print(f"контур: {current_contour.value} → [green]{new_contour.value}[/green]")
         new_token = settings.main_token if new_contour == Contour.LIVE else settings.sandbox_token
         console.print(f"токен: {settings.masked()} → {mask_token(new_token)}")
+        log_event("contour_changed", contour=new_contour.value)
     else:
         console.print(f"контур: {current_contour.value} (без изменений)")
 
@@ -316,6 +318,7 @@ def account_new(
     with _open_broker(settings) as br:
         resp = br.create_account(name=name)
         console.print(f"[green]счёт создан[/green]: {resp.account_id}")
+        log_event("account_created", account_id=resp.account_id)
 
 
 @app.command(name="account-rm")
@@ -349,6 +352,7 @@ def account_rm(
         
         br.close_account(target.id)
         console.print(f"[green]счёт удалён[/green]: {target.name or target.id}")
+        log_event("account_deleted", account_id=target.id)
 
 
 @app.command(name="account-show")
@@ -451,6 +455,15 @@ def order_buy(
         console.print("[green]заявка выставлена[/green]")
         console.print(f"  order_id: {resp.order_id}")
         console.print(f"  figi: {figi}")
+        
+        log_event(
+            "order_placed",
+            order_id=resp.order_id,
+            ticker=ticker,
+            lots=lots,
+            price=price,
+            direction="BUY",
+        )
 
 
 @app.command(name="order-sell")
@@ -506,6 +519,15 @@ def order_sell(
         console.print("[green]заявка выставлена[/green]")
         console.print(f"  order_id: {resp.order_id}")
         console.print(f"  figi: {figi}")
+        
+        log_event(
+            "order_placed",
+            order_id=resp.order_id,
+            ticker=ticker,
+            lots=lots,
+            price=price,
+            direction="SELL",
+        )
 
 
 @app.command(name="order-cancel")
@@ -520,6 +542,7 @@ def order_cancel(
         account = br.pick_account()
         br.cancel_order(account.id, order_id)
         console.print(f"[green]заявка отменена[/green]: {order_id}")
+        log_event("order_cancelled", order_id=order_id)
 
 
 # -- Команды истории и рынка ----------------------------------------------
@@ -873,6 +896,8 @@ def watchlist(
         if not ticker:
             _fail("укажите тикер: tcli watchlist add SBER", code=2)
         result = add_to_watchlist(ticker)
+        if result:
+            log_event("watchlist_add", ticker=ticker.upper())
         if json_output:
             console.print_json(data={"action": "add", "ticker": ticker.upper(), "added": result})
         else:
@@ -885,6 +910,8 @@ def watchlist(
         if not ticker:
             _fail("укажите тикер: tcli watchlist remove SBER", code=2)
         result = remove_from_watchlist(ticker)
+        if result:
+            log_event("watchlist_remove", ticker=ticker.upper())
         if json_output:
             console.print_json(data={"action": "remove", "ticker": ticker.upper(), "removed": result})
         else:
@@ -926,6 +953,7 @@ def account_select() -> None:
         set_env_value("SANDBOX_ACCOUNT_NAME", account_name)
         console.print(f"[green]выбран счёт:[/green] {account_name}")
         console.print("[dim]сохранено в .env как SANDBOX_ACCOUNT_NAME[/dim]")
+        log_event("account_selected", account_id=selected.id, account_name=account_name)
 
 
 @app.command()

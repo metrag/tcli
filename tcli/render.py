@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+import sys
+from datetime import datetime
 from typing import Any, Iterable
 
 from rich.console import Console
 from rich.table import Table
 
 console = Console()
+
+
+def log_event(event: str, level: str = "info", **kwargs: Any) -> None:
+    """Вывести структурированное событие в JSON формате в stderr.
+    
+    Args:
+        event: Название события (order_placed, account_created, error, etc.)
+        level: Уровень логирования (info, warning, error)
+        **kwargs: Дополнительные поля для лога
+    """
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "level": level,
+        "event": event,
+        **kwargs,
+    }
+    import json
+    print(json.dumps(log_entry, ensure_ascii=False), file=sys.stderr, flush=True)
+
 
 
 def money_to_float(value: Any) -> float:

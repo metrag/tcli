@@ -23,7 +23,7 @@ def load_cache() -> dict[str, str]:
     if not CACHE_PATH.exists():
         return {}
     try:
-        with open(CACHE_PATH, "r", encoding="utf-8") as f:
+        with open(CACHE_PATH, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
