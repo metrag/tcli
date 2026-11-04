@@ -217,6 +217,83 @@ def print_instruments(rows: Iterable[dict], query: str) -> None:
     console.print(table)
 
 
+def print_instruments_filtered(rows: Iterable[dict], filters: dict) -> None:
+    """Вывод отфильтрованных инструментов с детальной информацией."""
+    # Формируем заголовок на основе применённых фильтров
+    filter_parts = []
+    if filters.get("type"):
+        filter_parts.append(f"тип: {filters['type']}")
+    if filters.get("price_min") or filters.get("price_max"):
+        price_range = []
+        if filters.get("price_min"):
+            price_range.append(f"от {filters['price_min']}")
+        if filters.get("price_max"):
+            price_range.append(f"до {filters['price_max']}")
+        filter_parts.append(f"цена {' '.join(price_range)}")
+    if filters.get("currency"):
+        filter_parts.append(f"валюта: {filters['currency']}")
+    if filters.get("exchange"):
+        filter_parts.append(f"биржа: {filters['exchange']}")
+    if filters.get("available"):
+        filter_parts.append("доступные")
+    
+    title = "Инструменты"
+    if filter_parts:
+        title += f" ({', '.join(filter_parts)})"
+    
+    table = Table(title=title)
+    table.add_column("Тикер", style="cyan")
+    table.add_column("FIGI", style="dim")
+    table.add_column("Название")
+    table.add_column("Тип")
+    table.add_column("Лот", justify="right")
+    table.add_column("Валюта")
+    table.add_column("Мин. шаг", justify="right")
+    table.add_column("Биржа")
+    
+    # Дополнительные колонки для облигаций
+    if filters.get("type") == "bond":
+        table.add_column("Дата погаш.", style="yellow")
+        table.add_column("Номинал", justify="right", style="green")
+    
+    # Дополнительные колонки для акций
+    if filters.get("type") == "share":
+        table.add_column("Див. дох.", justify="right", style="green")
+    
+    for row in rows:
+        row_data = [
+            str(row.get("ticker", "")),
+            str(row.get("figi", "")),
+            str(row.get("name", "")),
+            str(row.get("type", "")),
+            str(row.get("lot", "")),
+            str(row.get("currency", "")),
+            str(row.get("min_price_step", "")),
+            str(row.get("exchange", "")),
+        ]
+        
+        # Дополнительные данные для облигаций
+        if filters.get("type") == "bond":
+            maturity = row.get("maturity_date")
+            if maturity:
+                maturity_str = str(maturity)[:10] if not isinstance(maturity, str) else maturity[:10]
+            else:
+                maturity_str = ""
+            nominal = row.get("nominal")
+            row_data.extend([maturity_str, fmt_money(nominal) if nominal else ""])
+        
+        # Дополнительные данные для акций
+        if filters.get("type") == "share":
+            dividend_yield = row.get("dividend_yield")
+            if dividend_yield:
+                row_data.append(f"{float(dividend_yield):.2f}%")
+            else:
+                row_data.append("")
+        
+        table.add_row(*row_data)
+    
+    console.print(table)
+
 def print_watchlist(rows: Iterable[dict]) -> None:
     """Вывод списка отслеживаемых инструментов с ценами."""
     table = Table(title="Избранное (Watchlist)")

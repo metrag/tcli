@@ -289,6 +289,60 @@ class Broker:
         resp = with_retries(lambda: self._client.instruments.find_instrument(query=query))
         return list(resp.instruments)
 
+    # -- Получение всех инструментов по типу ------------------------------
+
+    def get_all_shares(self) -> list[Any]:
+        """Получить все акции."""
+        resp = with_retries(lambda: self._client.instruments.shares())
+        return list(resp.instruments)
+
+    def get_all_bonds(self) -> list[Any]:
+        """Получить все облигации."""
+        resp = with_retries(lambda: self._client.instruments.bonds())
+        return list(resp.instruments)
+
+    def get_all_etfs(self) -> list[Any]:
+        """Получить все ETF."""
+        resp = with_retries(lambda: self._client.instruments.etfs())
+        return list(resp.instruments)
+
+    def get_all_futures(self) -> list[Any]:
+        """Получить все фьючерсы."""
+        resp = with_retries(lambda: self._client.instruments.futures())
+        return list(resp.instruments)
+
+    def get_all_currencies(self) -> list[Any]:
+        """Получить все валюты."""
+        resp = with_retries(lambda: self._client.instruments.currencies())
+        return list(resp.instruments)
+
+    def get_all_instruments(self, instrument_type: Optional[str] = None) -> list[Any]:
+        """Получить все инструменты (опционально по типу).
+        
+        Args:
+            instrument_type: тип инструмента (share/bond/etf/future/currency).
+                           Если None, возвращает все типы.
+        """
+        if instrument_type == "share":
+            return self.get_all_shares()
+        elif instrument_type == "bond":
+            return self.get_all_bonds()
+        elif instrument_type == "etf":
+            return self.get_all_etfs()
+        elif instrument_type == "future":
+            return self.get_all_futures()
+        elif instrument_type == "currency":
+            return self.get_all_currencies()
+        else:
+            # Возвращаем все типы
+            all_instruments = []
+            all_instruments.extend(self.get_all_shares())
+            all_instruments.extend(self.get_all_bonds())
+            all_instruments.extend(self.get_all_etfs())
+            all_instruments.extend(self.get_all_futures())
+            all_instruments.extend(self.get_all_currencies())
+            return all_instruments
+
     def instrument_by_figi(self, figi: str) -> Any:
         try:
             resp = with_retries(

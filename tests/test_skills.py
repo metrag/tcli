@@ -1,11 +1,10 @@
 """Тесты для модуля навыков торгового агента."""
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from skills.base import run_tcli_command, TcliError
+from skills.base import TcliError, run_tcli_command
 
 
 class TestRunTcliCommand:
@@ -184,7 +183,9 @@ class TestTrading:
         result = place_order("SBER", "buy", 10, price=285.5)
         
         assert result["order_id"] == "12345"
-        mock_run.assert_called_once_with(["order-buy", "SBER", "--quantity", "10", "--no-prompt", "--json", "--price", "285.5"])
+        mock_run.assert_called_once_with(
+            ["order-buy", "SBER", "--quantity", "10", "--no-prompt", "--json", "--price", "285.5"]
+        )
 
     @patch("skills.trading.run_tcli_command")
     def test_place_market_order(self, mock_run):
