@@ -271,6 +271,215 @@ tcli/
 ├── render.py           # таблицы rich (включая watchlist и info)
 ├── ssl.py              # подкладка корня НУЦ в gRPC
 └── watchlist_utils.py  # утилиты для работы с избранным (watchlist.json)
+
+skills/
+├── __init__.py         # экспорты всех функций
+├── base.py             # базовая инфраструктура (run_tcli_command)
+├── market_data.py      # рыночные данные (котировки, свечи, портфель)
+├── trading.py          # торговые операции (заявки)
+├── account.py          # управление счетами
+└── analytics.py        # аналитика и инструменты
+```
+
+## Skills модуль (Python API для торгового агента)
+
+Модуль `skills/` предоставляет высокоуровневый Python API для взаимодействия с `tcli`. Все функции принимают Python-словари и возвращают структурированные данные, автоматически вызывая соответствующие команды `tcli` с флагами `--json` и `--no-prompt`.
+
+### Установка и использование
+
+```python
+from skills import get_quote, place_order, get_portfolio
+
+# Получение котировки
+quote = get_quote('SBER')
+print(quote['price'])  # '285.50'
+
+# Получение портфеля
+portfolio = get_portfolio()
+for pos in portfolio['positions']:
+    print(f"{pos['ticker']}: {pos['quantity']} @ {pos['current_price']}")
+
+# Размещение заявки
+result = place_order('SBER', 'buy', 1, price=285.50)
+print(result['order_id'])
+```
+
+### Функции по категориям
+
+#### Market Data (рыночные данные)
+
+```python
+from skills import get_quote, get_candles, get_portfolio, get_status, get_orders
+
+# Текущая цена инструмента
+quote = get_quote('SBER')
+# Возвращает: {'ticker': str, 'figi': str, 'price': str, 'time': str}
+
+# История свечей
+candles = get_candles('SBER', interval='1hour', days=7)
+# Возвращает: {'ticker': str, 'interval': str, 'days': int, 'candles': list[dict]}
+# Каждая свеча: {'time': str, 'open': str, 'high': str, 'low': str, 'close': str, 'volume': int}
+
+# Позиции портфеля
+portfolio = get_portfolio()
+# Возвращает: {'positions': list[dict]}
+# Каждая позиция: {'ticker': str, 'figi': str, 'quantity': str, 'average_price': str, 
+#                   'current_price': str, 'value': str, 'pnl': str, 'pnl_percent': str}
+
+# Статус счетов и сводка портфеля
+status = get_status()
+# Возвращает: {'contour': str, 'accounts': list[dict], 'portfolio': dict}
+
+# Активные заявки
+orders = get_orders()
+# Возвращает: {'orders': list[dict]}
+```
+
+#### Trading (торговые операции)
+
+```python
+from skills import place_order, cancel_order, get_order_info
+
+# Размещение заявки (лимитная)
+result = place_order('SBER', 'buy', 1, price=285.50)
+# Возвращает: {'order_id': str, 'figi': str, 'status': str}
+
+# Размещение заявки (рыночная)
+result = place_order('SBER', 'sell', 1)  # без price
+# Возвращает: {'order_id': str, 'figi': str, 'status': str}
+
+# Отмена заявки
+result = cancel_order('12345')
+# Возвращает: {'status': 'cancelled', 'order_id': str}
+
+# Информация о заявке
+order = get_order_info('12345')
+# Возвращает: {'order_id': str, 'ticker': str, 'direction': str, 'quantity': str, 
+#               'price': str, 'status': str, 'created_at': str}
+```
+
+#### Account (управление счетами)
+
+```python
+from skills import get_accounts, select_account, get_current_account, get_account_info
+
+# Список всех счетов
+accounts = get_accounts()
+# Возвращает: {'accounts': list[dict]}
+# Каждый счет: {'id': str, 'name': str, 'type': str, 'status': str}
+
+# Выбор активного счета
+result = select_account('account-name')
+# Возвращает: {'status': 'selected', 'account_id': str, 'account_name': str}
+
+# Текущий активный счет
+current = get_current_account()
+# Возвращает: {'account_id': str, 'account_name': str}
+
+# Информация о счете
+info = get_account_info('account-id')
+# Возвращает: {'id': str, 'name': str, 'type': str, 'status': str, 'portfolio': dict}
+```
+
+#### Analytics (аналитика и инструменты)
+
+```python
+from skills import (
+    search_instruments, get_instrument_info, 
+    get_instrument_by_figi, get_instrument_by_isin,
+    search_by_type, get_watchlist, 
+    add_to_watchlist, remove_from_watchlist
+)
+
+# Поиск инструментов
+results = search_instruments('SBER')
+# Возвращает: {'instruments': list[dict]}
+# Каждый инструмент: {'ticker': str, 'figi': str, 'name': str, 'type': str, 'class_code': str}
+
+# Информация об инструменте
+info = get_instrument_info('SBER')
+# Возвращает: {'ticker': str, 'figi': str, 'name': str, 'isin': str, 
+#               'lot': int, 'currency': str, 'type': str, 'exchange': str}
+
+# Поиск по FIGI
+info = get_instrument_by_figi('BBG004730N88')
+# Возвращает: {'ticker': str, 'figi': str, 'name': str, ...}
+
+# Поиск по ISIN
+info = get_instrument_by_isin('RU000A0ZY7C3')
+# Возвращает: {'ticker': str, 'figi': str, 'name': str, ...}
+
+# Поиск по типу инструмента
+results = search_by_type('share')
+# Возвращает: {'instruments': list[dict]}
+
+# Список отслеживаемых инструментов
+watchlist = get_watchlist()
+# Возвращает: {'watchlist': list[dict]}
+# Каждый элемент: {'ticker': str, 'figi': str, 'added_at': str}
+
+# Добавить в watchlist
+result = add_to_watchlist('SBER')
+# Возвращает: {'status': 'added', 'ticker': str}
+
+# Удалить из watchlist
+result = remove_from_watchlist('SBER')
+# Возвращает: {'status': 'removed', 'ticker': str}
+```
+
+### Обработка ошибок
+
+Все функции могут выбрасывать исключение `TcliError` при ошибке выполнения команды:
+
+```python
+from skills import get_quote
+from skills.base import TcliError
+
+try:
+    quote = get_quote('INVALID_TICKER')
+except TcliError as e:
+    print(f"Ошибка: {e.message}")
+    print(f"Код ошибки: {e.exit_code}")
+```
+
+### Особенности реализации
+
+- Все функции автоматически добавляют флаги `--json` и `--no-prompt` к командам
+- Таймаут выполнения: 30 секунд
+- Работает только в неинтерактивном режиме (без подтверждений)
+- Возвращает только структурированные данные (JSON)
+- Все цены и суммы возвращаются как строки (для точности)
+
+### Интеграция с торговым агентом
+
+Модуль `skills/` разработан для интеграции с торговым агентом. Все функции:
+
+1. **Детерминированы** — одинаковые входные данные дают одинаковый результат
+2. **Безопасны** — требуют явного подтверждения только для опасных операций
+3. **Структурированы** — возвращают Python-словари вместо текста
+4. **Логируются** — все операции записываются в структурированные JSON логи
+
+Пример полного торгового сценария:
+
+```python
+from skills import get_quote, place_order, get_portfolio
+
+# Анализ
+quote = get_quote('SBER')
+current_price = float(quote['price'])
+
+# Торговое решение (упрощённо)
+if current_price < 280.0:
+    # Покупка
+    result = place_order('SBER', 'buy', 1, price=279.50)
+    print(f"Заявка размещена: {result['order_id']}")
+
+# Проверка портфеля
+portfolio = get_portfolio()
+for pos in portfolio['positions']:
+    pnl_percent = float(pos['pnl_percent'])
+    if pnl_percent > 10.0:
+        print(f"{pos['ticker']}: прибыль {pnl_percent}%")
 ```
 
 ## Ограничения
