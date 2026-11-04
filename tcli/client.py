@@ -355,21 +355,33 @@ class Broker:
             raise TickerNotFoundError(f"инструмент по FIGI не найден: {figi}") from exc
 
     def instrument_by_ticker(self, ticker: str, class_code: str = "") -> Any:
-        # Сначала пробуем прямой поиск по тикеру
-        try:
-            resp = with_retries(
-                lambda: self._client.instruments.get_instrument_by(
-                    id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER, id=ticker
+        # ВАЖНО: GetInstrumentBy отклоняет id_type=ticker без class_code
+        # (INVALID_ARGUMENT 30013: "class_code require for id_type = ticker"),
+        # поэтому без явного class_code сразу идём через find_instrument.
+        if class_code:
+            try:
+                resp = with_retries(
+                    lambda: self._client.instruments.get_instrument_by(
+                        id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER,
+                        id=ticker,
+                        class_code=class_code,
+                    )
                 )
-            )
-            return resp.instrument
-        except Exception:
-            # Fallback: ищем через find_instrument и фильтруем по точному совпадению тикера
-            instruments = self.find_instrument(ticker)
-            for inst in instruments:
-                if getattr(inst, "ticker", "") == ticker:
-                    return inst
+                return resp.instrument
+            except Exception:
+                pass
+        # Fallback: ищем через find_instrument и фильтруем по точному совпадению тикера
+        instruments = self.find_instrument(ticker)
+        exact = [i for i in instruments if getattr(i, "ticker", "") == ticker]
+        if not exact:
             raise TickerNotFoundError(f"инструмент по тикеру не найден: {ticker}") from None
+        # Один тикер встречается в нескольких классах (TQBR, SMAL, SPEQ, 37M...):
+        # приоритет — основной режим торгов TQBR, иначе можно получить первый
+        # попавшийся класс без рыночных данных (последняя цена 0).
+        for inst in exact:
+            if getattr(inst, "class_code", "") == "TQBR":
+                return inst
+        return exact[0]
 
     def instrument_by_uid(self, uid: str) -> Any:
         """Поиск инструмента по внутреннему ID (uid) Т-Банка."""
