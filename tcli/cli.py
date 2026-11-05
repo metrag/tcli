@@ -454,6 +454,41 @@ def export(
             console.print(f"[green]Экспортировано {len(rows)} операций в {output}[/green]")
 
 
+
+@app.command()
+@_guard
+def halt(
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
+) -> None:
+    """Аварийный выключатель: отмена всех заявок + закрытие позиций (#34)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    console.print("[bold red]⚠ АВАРИЙНЫЙ ВЫКЛЮЧАТЕЛЬ[/bold red]")
+    console.print("Отмена всех заявок и закрытие всех позиций...")
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        # Выполняем аварийную остановку
+        result = br.emergency_halt(account_id=account.id)
+        
+        if json_output:
+            print_json(data=result, contour=settings.contour.value, account=account.id)
+        else:
+            console.print("\n[bold]Результат:[/bold]")
+            console.print(f"  Отменено заявок: {result['cancelled_orders']}")
+            console.print(f"  Отменено стоп-заявок: {result['cancelled_stop_orders']}")
+            console.print(f"  Закрыто позиций: {result['closed_positions']}")
+            
+            if result['errors']:
+                console.print("\n[red]Ошибки:[/red]")
+                for error in result['errors']:
+                    console.print(f"  • {error}")
+            else:
+                console.print("\n[green]✓ Аварийная остановка завершена успешно[/green]")
+
+
 @app.command()
 @_guard
 def clock(

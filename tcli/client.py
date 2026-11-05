@@ -621,6 +621,57 @@ f"варианты: {available}"
                 continue
         return cancelled
 
+    def emergency_halt(self, account_id: str) -> dict:
+        """Аварийный выключатель (#34 из TODO.md).
+        
+        Отменяет все заявки, стоп-заявки и закрывает все позиции.
+        """
+        from tinkoff.invest.schemas import OrderDirection, OrderType
+        
+        result = {
+            'cancelled_orders': 0,
+            'cancelled_stop_orders': 0,
+            'closed_positions': 0,
+            'errors': [],
+        }
+        
+        # 1. Отмена всех заявок
+        try:
+            cancelled = self.cancel_all_orders(account_id)
+            result['cancelled_orders'] = len(cancelled)
+        except Exception as e:
+            result['errors'].append(f"Ошибка отмены заявок: {e}")
+        
+        # 2. Отмена всех стоп-заявок
+        try:
+            cancelled_stops = self.cancel_all_stop_orders(account_id)
+            result['cancelled_stop_orders'] = len(cancelled_stops)
+        except Exception as e:
+            result['errors'].append(f"Ошибка отмены стоп-заявок: {e}")
+        
+        # 3. Закрытие всех позиций
+        try:
+            portfolio = self.portfolio(account_id)
+            for position in portfolio.positions:
+                quantity = abs(position.quantity.value)
+                if quantity > 0:
+                    try:
+                        # Закрываем позицию рыночной заявкой на продажу
+                        self.place_order(
+                            account_id=account_id,
+                            figi=position.figi,
+                            direction=OrderDirection.ORDER_DIRECTION_SELL,
+                            quantity=quantity,
+                            order_type=OrderType.ORDER_TYPE_MARKET,
+                        )
+                        result['closed_positions'] += 1
+                    except Exception as e:
+                        result['errors'].append(f"Ошибка закрытия {position.figi}: {e}")
+        except Exception as e:
+            result['errors'].append(f"Ошибка получения портфеля: {e}")
+        
+        return result
+
     def get_order_info(self, account_id: str, order_id: str) -> Any:
         """Получить информацию о заявке."""
         orders = self.orders(account_id)
