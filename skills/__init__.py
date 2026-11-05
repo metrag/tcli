@@ -23,6 +23,13 @@ from .analytics import (
     search_instruments,
 )
 from .market_data import get_candles, get_orders, get_portfolio, get_quote
+from .risk_helpers import (
+    estimate_commission,
+    get_free_cash,
+    has_position,
+    is_market_open,
+    position_size,
+)
 from .trading import cancel_order, get_order_info, place_order
 
 __all__ = [
@@ -52,4 +59,11 @@ __all__ = [
     'get_watchlist',
     'add_to_watchlist',
     'remove_from_watchlist',
+    
+    # Risk helpers (#30-#33)
+    'position_size',
+    'estimate_commission',
+    'get_free_cash',
+    'has_position',
+    'is_market_open',
 ]
