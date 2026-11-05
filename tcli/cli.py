@@ -35,6 +35,7 @@ from .render import (
     print_instrument_info,
     print_instruments,
     print_instruments_filtered,
+    print_json,
     print_operations,
     print_orderbook,
     print_orders,
@@ -215,7 +216,7 @@ def status(json_output: bool = typer.Option(False, "--json", help="Вывод в
                 "accounts": account_rows,
                 "portfolio": portfolio_rows
             }
-            console.print_json(data=result)
+            print_json(data=result, contour=settings.contour.value, account="")
         else:
             print_accounts(account_rows, contour=br.contour)
             print_summary(portfolio_rows, contour=br.contour)
@@ -232,13 +233,13 @@ def positions(json_output: bool = typer.Option(False, "--json", help="Вывод
         portfolio = br.portfolio(account.id)
         if not portfolio.positions:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account=account.name or account.id)
             else:
                 console.print("позиций нет")
             raise typer.Exit(0)
         rows = [Broker.position_row(p) for p in portfolio.positions]
         if json_output:
-            console.print_json(data=rows)
+            print_json(data=rows, contour=settings.contour.value, account=account.name or account.id)
         else:
             print_positions(rows)
 
@@ -254,13 +255,13 @@ def orders(json_output: bool = typer.Option(False, "--json", help="Вывод в
         active = br.orders(account.id)
         if not active:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account=account.name or account.id)
             else:
                 console.print("активных заявок нет")
             raise typer.Exit(0)
         rows = [Broker.order_row(o, br.ticker(o.figi)) for o in active]
         if json_output:
-            console.print_json(data=rows)
+            print_json(data=rows, contour=settings.contour.value, account=account.name or account.id)
         else:
             print_orders(rows, active=True)
 
@@ -631,7 +632,7 @@ def quote(
                 "price": str(last.price),
                 "time": str(last.time)
             }
-            console.print_json(data=result)
+            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
         else:
             console.print(f"\n[bold]{ticker}[/bold] (FIGI: {figi})")
             console.print(f"  Последняя цена: {fmt_money(last.price)}")
@@ -732,7 +733,7 @@ def candles(
         
         if not candle_list:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print("свечей нет")
             raise typer.Exit(0)
@@ -747,7 +748,7 @@ def candles(
         
         if not candle_list:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print(f"свечей для сессии '{session}' не найдено")
             raise typer.Exit(0)
@@ -772,7 +773,7 @@ def candles(
                 "to": to_dt.isoformat(),
                 "candles": rows
             }
-            console.print_json(data=result)
+            print_json(data=result, contour=settings.contour.value, account="")
         else:
             print_candles(rows, ticker=ticker, interval=interval)
 
@@ -896,7 +897,7 @@ def find(
         
         if not instruments:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print("инструменты не найдены")
             raise typer.Exit(0)
@@ -912,7 +913,7 @@ def find(
             })
         
         if json_output:
-            console.print_json(data=rows)
+            print_json(data=rows, contour=settings.contour.value, account="")
         else:
             print_instruments(rows, query=query)
 
@@ -966,7 +967,7 @@ def instruments(
         
         if not all_instruments:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print("инструменты не найдены")
             raise typer.Exit(0)
@@ -1095,7 +1096,7 @@ def instruments(
         
         if not filtered:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print("инструменты не найдены с заданными фильтрами")
             raise typer.Exit(0)
@@ -1142,7 +1143,7 @@ def instruments(
             rows.append(row)
         
         if json_output:
-            console.print_json(data=rows)
+            print_json(data=rows, contour=settings.contour.value, account="")
         else:
             filters = {
                 "type": instrument_type,
@@ -1258,7 +1259,7 @@ def watchlist(
         tickers = load_watchlist()
         if not tickers:
             if json_output:
-                console.print_json(data=[])
+                print_json(data=[], contour=settings.contour.value, account=account.name or account.id)
             else:
                 console.print("watchlist пуст — добавьте инструменты: tcli watchlist add SBER")
             raise typer.Exit(0)
@@ -1299,7 +1300,7 @@ def watchlist(
                 })
             
             if json_output:
-                console.print_json(data=rows)
+                print_json(data=rows, contour=settings.contour.value, account="")
             else:
                 print_watchlist(rows)
     
@@ -1310,7 +1311,7 @@ def watchlist(
         if result:
             log_event("watchlist_add", ticker=ticker.upper())
         if json_output:
-            console.print_json(data={"action": "add", "ticker": ticker.upper(), "added": result})
+            print_json(data={"action": "add", "ticker": ticker.upper(), "added": result}, contour=settings.contour.value, account="")
         else:
             if result:
                 console.print(f"[green]добавлено в watchlist:[/green] {ticker.upper()}")
@@ -1324,7 +1325,7 @@ def watchlist(
         if result:
             log_event("watchlist_remove", ticker=ticker.upper())
         if json_output:
-            console.print_json(data={"action": "remove", "ticker": ticker.upper(), "removed": result})
+            print_json(data={"action": "remove", "ticker": ticker.upper(), "removed": result}, contour=settings.contour.value, account="")
         else:
             if result:
                 console.print(f"[green]удалено из watchlist:[/green] {ticker.upper()}")
@@ -1415,7 +1416,7 @@ def info(
             info_dict["price_currency"] = None
         
         if json_output:
-            console.print_json(data=info_dict)
+            print_json(data=info_dict, contour=settings.contour.value, account="")
         else:
             print_instrument_info(info_dict)
 
@@ -1493,13 +1494,13 @@ def orderbook(
         limit_down = money_to_float(ob.limit_down)
         
         if json_output:
-            console.print_json(data={
+            print_json(data={
                 "figi": figi,
                 "bids": bids,
                 "asks": asks,
                 "limit_up": limit_up,
                 "limit_down": limit_down,
-            })
+            }, contour=settings.contour.value, account="")
         else:
             print_orderbook(figi, bids, asks, limit_up, limit_down)
 
@@ -1542,7 +1543,7 @@ def trading_status(
         }
         
         if json_output:
-            console.print_json(data=result)
+            print_json(data=result, contour=settings.contour.value, account="")
         else:
             print_trading_status(figi, result)
 
@@ -1579,7 +1580,7 @@ def sessions(
             })
         
         if json_output:
-            console.print_json(data={"exchange": exchange, "days": rows})
+            print_json(data={"exchange": exchange, "days": rows}, contour=settings.contour.value, account="")
         else:
             from rich.table import Table
             table = Table(title=f"Расписание торгов ({exchange})")
@@ -1708,7 +1709,7 @@ def estimate(
                 result["commission"] = {"error": str(exc)}
         
         if json_output:
-            console.print_json(data=result)
+            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
         else:
             console.print("\n[bold]Оценка заявки:[/bold]")
             console.print(f"  Инструмент: {result['ticker']} (FIGI: {result['figi']})")
@@ -1783,7 +1784,7 @@ def close(
         log_event("position_closed", ticker=ticker, figi=figi, quantity=quantity)
         
         if json_output:
-            console.print_json(data={"order_id": result.order_id, "ticker": ticker})
+            print_json(data={"order_id": result.order_id, "ticker": ticker}, contour=settings.contour.value, account=account.name or account.id)
 
 
 @app.command()
@@ -1836,7 +1837,7 @@ def close_all(
         log_event("all_positions_closed", count=len(closed))
         
         if json_output:
-            console.print_json(data={"closed": closed})
+            print_json(data={"closed": closed}, contour=settings.contour.value, account=account.name or account.id)
 
 
 @app.command()
@@ -1858,7 +1859,7 @@ def cancel_all(
         log_event("all_orders_canceled", count=result.orders_canceled)
         
         if json_output:
-            console.print_json(data={"canceled": result.orders_canceled})
+            print_json(data={"canceled": result.orders_canceled}, contour=settings.contour.value, account=account.name or account.id)
 
 
 @app.command()
@@ -1890,7 +1891,7 @@ def order_info(
         }
         
         if json_output:
-            console.print_json(data=info_dict)
+            print_json(data=info_dict, contour=settings.contour.value, account=account.name or account.id)
         else:
             console.print(f"\n[bold]Заявка[/bold] {order_id}")
             console.print("=" * 60)
@@ -1928,7 +1929,7 @@ def stop_order_list(
             })
         
         if json_output:
-            console.print_json(data={"stop_orders": rows})
+            print_json(data={"stop_orders": rows}, contour=settings.contour.value, account=account.name or account.id)
         else:
             print_stop_orders(rows)
 
@@ -1960,7 +1961,7 @@ def stop_order_cancel(
         log_event("stop_order_cancelled", stop_order_id=stop_order_id)
         
         if json_output:
-            console.print_json(data={"cancelled": stop_order_id})
+            print_json(data={"cancelled": stop_order_id}, contour=settings.contour.value, account=account.name or account.id)
 
 
 @app.command()
@@ -2045,7 +2046,7 @@ def stop_order_place(
                 "stop_price": str(stop_price_quotation),
                 "price": str(price_quotation) if price_quotation else "market",
             }
-            console.print_json(data=result)
+            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
         else:
             console.print("\n[green]стоп-заявка размещена[/green]")
             console.print(f"  stop_order_id: {stop_order_id}")
@@ -2079,7 +2080,7 @@ def stop_order_cancel_all(
         
         if count == 0:
             if json_output:
-                console.print_json(data={"cancelled_count": 0, "cancelled_ids": []})
+                print_json(data={"cancelled_count": 0, "cancelled_ids": []}, contour=settings.contour.value, account=account.name or account.id)
             else:
                 console.print("активных стоп-заявок нет")
             raise typer.Exit(0)
@@ -2103,7 +2104,7 @@ def stop_order_cancel_all(
                 "cancelled_count": cancelled_count,
                 "cancelled_ids": cancelled_ids
             }
-            console.print_json(data=result)
+            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
         else:
             console.print(f"[green]отменено стоп-заявок:[/green] {cancelled_count} из {count}")
             for stop_id in cancelled_ids:
@@ -2129,7 +2130,7 @@ def free_cash(
         currency = getattr(cash, "currency", "RUB") if cash else "RUB"
         
         if json_output:
-            console.print_json(data={"amount": amount, "currency": currency})
+            print_json(data={"amount": amount, "currency": currency}, contour=settings.contour.value, account=account.name or account.id)
         else:
             console.print(f"[bold]Свободные средства:[/bold] {amount:,.2f} {currency}")
 
@@ -2157,7 +2158,7 @@ def has_position(
         quantity = money_to_float(position.quantity) if position else 0.0
         
         if json_output:
-            console.print_json(
+            print_json(
                 data={
                     "ticker": ticker,
                     "figi": figi,
@@ -2191,7 +2192,7 @@ def is_market_open(
         open_status = br.is_market_open(figi)
         
         if json_output:
-            console.print_json(data={"ticker": ticker, "figi": figi, "market_open": open_status})
+            print_json(data={"ticker": ticker, "figi": figi, "market_open": open_status}, contour=settings.contour.value, account=account.name or account.id)
         else:
             if open_status:
                 console.print(f"[green]✓ рынок открыт:[/green] {ticker}")

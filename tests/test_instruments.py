@@ -261,6 +261,10 @@ class TestInstrumentsCommand:
             def get_all_instruments(self, instrument_type=None):
                 return instruments
 
+            def last_prices(self, figi_list):
+                # Возвращаем пустой список, чтобы не вызывать реальный API
+                return []
+
         monkeypatch.setattr("tcli.cli._open_broker", lambda settings: MockBroker(settings))
 
         result = runner.invoke(app, ["instruments", "--json"])

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from rich.console import Console
@@ -21,7 +21,7 @@ def log_event(event: str, level: str = "info", **kwargs: Any) -> None:
         **kwargs: Дополнительные поля для лога
     """
     log_entry = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "level": level,
         "event": event,
         **kwargs,
@@ -51,8 +51,8 @@ def json_envelope(data: Any, contour: str, account: str, ok: bool = True, error:
         "ok": ok,
         "contour": contour,
         "account": account,
-        "ts": datetime.now().isoformat(),
-        "tz": "Europe/Moscow",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "tz": "UTC",
         "data": data if ok else None,
     }
     if error:

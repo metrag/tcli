@@ -73,9 +73,9 @@
 
 | № | Функция | Описание | P |
 |---|---------|----------|---|
-| 39 | Единый JSON-envelope | Каждый `--json`: `{ok, contour, account, ts, tz, data, error}` | **P0** |
-| 40 | Коды ошибок | `INSUFFICIENT_FUNDS`, `MARKET_CLOSED`, `INVALID_LOT`, `RATE_LIMITED`, `INSTRUMENT_NOT_FOUND`, `ORDER_NOT_FOUND`, `CONTOUR_MISMATCH` | **P0** |
-| 41 | Явная таймзона | ISO-8601 + `tz` (выбрать UTC или Europe/Moscow и документировать) | **P0** |
+| 39 | ✅ Единый JSON-envelope | Каждый `--json`: `{ok, contour, account, ts, tz, data, error}` | **P0** |
+| 40 | ✅ Коды ошибок | `INSUFFICIENT_FUNDS`, `MARKET_CLOSED`, `INVALID_LOT`, `RATE_LIMITED`, `INSTRUMENT_NOT_FOUND`, `ORDER_NOT_FOUND`, `CONTOUR_MISMATCH` | **P0** |
+| 41 | ✅ Явная таймзона | ISO-8601 + `tz` (выбрать UTC или Europe/Moscow и документировать) | **P0** |
 | 42 | `AsyncBroker` — прямой gRPC | Асинхронный клиент в skills без subprocess (subprocess на каждый тик = десятки мс) | P1 |
 | 43 | Retry + rate-limit handler | Backoff для 429/сетевых ошибок | P1 |
 | 44 | Reconnect стримов | Автопереподписка + восстановление снапшота после разрыва | P1 |
