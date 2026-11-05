@@ -790,6 +790,17 @@ f"варианты: {available}"
         )
         return list(resp.candles)
 
+    def get_trades(
+        self, figi: str, from_: Optional[Any] = None, to: Optional[Any] = None
+    ) -> list[Any]:
+        """Получить историю сделок биржи за период."""
+        resp = with_retries(
+            lambda: self._client.market_data.get_last_trades(
+                figi=figi, from_=from_, to=to
+            )
+        )
+        return list(resp.trades)
+
     # -- Представления ----------------------------------------------------
 
     @staticmethod

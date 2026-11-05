@@ -168,6 +168,115 @@ def check() -> None:
 
 
 
+
+@app.command()
+@_guard
+def trades(
+    ticker: str = typer.Argument(..., help="Тикер инструмента"),
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Начальная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
+    to_date: Optional[str] = typer.Option(
+        None, "--to", help="Конечная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
+) -> None:
+    """История сделок биржи за период (#12 из TODO.md)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    # Парсинг дат
+    now = datetime.now(timezone.utc)
+    if to_date:
+        try:
+            if "T" in to_date:
+                to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+            else:
+                to_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(f"неверный формат --to: {to_date} (используйте YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)", code=2)
+    else:
+        to_dt = now
+    
+    if from_date:
+        try:
+            if "T" in from_date:
+                from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            else:
+                from_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(
+                f"неверный формат --from: {from_date} "
+                "(используйте YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)",
+                code=2,
+            )
+    else:
+        # По умолчанию - последние 24 часа
+        from_dt = to_dt - timedelta(days=1)
+    
+    with _open_broker(settings) as br:
+        figi = br.figi(ticker)
+        
+        # Получаем сделки с API
+        trades_list = br.get_trades(
+            figi=figi,
+            from_=from_dt,
+            to=to_dt,
+        )
+        
+        if not trades_list:
+            if json_output:
+                print_json(data=[], contour=settings.contour.value, account="")
+            else:
+                console.print("сделок нет")
+            raise typer.Exit(0)
+        
+        # Форматируем результаты
+        rows = []
+        for trade in trades_list:
+            rows.append({
+                "time": str(trade.time),
+                "price": str(trade.price),
+                "quantity": trade.quantity,
+                "direction": (
+                    "BUY" if trade.direction == 1 
+                    else "SELL" if trade.direction == 2 
+                    else str(trade.direction)
+                ),
+            })
+        
+        if json_output:
+            result = {
+                "ticker": ticker,
+                "from": from_dt.isoformat(),
+                "to": to_dt.isoformat(),
+                "trades": rows
+            }
+            print_json(data=result, contour=settings.contour.value, account="")
+        else:
+            console.print(f"\n[bold]Сделки {ticker}[/bold] ({len(rows)} шт.)")
+            from_str = from_dt.strftime('%Y-%m-%d %H:%M')
+            to_str = to_dt.strftime('%Y-%m-%d %H:%M')
+            console.print(f"Период: {from_str} — {to_str}")
+            
+            from rich.table import Table
+            table = Table()
+            table.add_column("Время", style="cyan")
+            table.add_column("Цена", justify="right", style="green")
+            table.add_column("Количество", justify="right")
+            table.add_column("Направление", style="magenta")
+            
+            for row in rows:
+                table.add_row(
+                    row["time"][:19],
+                    row["price"],
+                    str(row["quantity"]),
+                    row["direction"],
+                )
+            
+            console.print(table)
+
+
 @app.command()
 @_guard
 def clock(
@@ -936,6 +1045,9 @@ def candles(
     to_date: Optional[str] = typer.Option(
         None, "--to", help="Конечная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
     ),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Файл для экспорта (CSV или JSON)"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
 ) -> None:
     """История свечей инструмента с расширенной фильтрацией (#2-4 из TODO.md)."""
@@ -1037,6 +1149,32 @@ def candles(
                 "close": str(c.close),
                 "volume": c.volume,
             })
+        
+        # Экспорт в файл (#11 из TODO.md)
+        if output:
+            if output.endswith('.json'):
+                result = {
+                    "ticker": ticker,
+                    "interval": interval,
+                    "session": session,
+                    "from": from_dt.isoformat(),
+                    "to": to_dt.isoformat(),
+                    "candles": rows
+                }
+                import json
+                with open(output, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+            elif output.endswith('.csv'):
+                import csv
+                with open(output, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=['time', 'open', 'high', 'low', 'close', 'volume'])
+                    writer.writeheader()
+                    writer.writerows(rows)
+            else:
+                _fail(f"неподдерживаемый формат файла: {output} (используйте .json или .csv)", code=2)
+            
+            console.print(f"[green]Экспортировано {len(rows)} свечей в {output}[/green]")
+            raise typer.Exit(0)
         
         if json_output:
             result = {
