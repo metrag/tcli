@@ -436,6 +436,9 @@ def order_buy(
         None, "--client-order-id", help="ID заявки для идемпотентности (UUIDv4)"
     ),
     tif: Optional[str] = typer.Option(None, "--tif", help="Time-in-force: ioc|fok|gtc"),
+    sl: Optional[float] = typer.Option(
+        None, "--sl", help="Stop-loss цена (автоматически разместит стоп-заявку)"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
     no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
@@ -513,6 +516,39 @@ def order_buy(
             price=price,
             direction="BUY",
         )
+        
+        # Размещаем стоп-заявку если указан --sl (#24)
+        if sl is not None:
+            console.print(f"\n[yellow]Размещаю стоп-заявку на {sl}...[/yellow]")
+            sl_units = int(sl)
+            sl_nano = int(round((sl - sl_units) * 1e9))
+            sl_quotation = Quotation(units=sl_units, nano=sl_nano)
+            
+            try:
+                # Для BUY заявки стоп-заявка будет на SELL (защита от падения)
+                stop_resp = br.place_stop_order(
+                    account_id=account.id,
+                    figi=figi,
+                    direction=OrderDirection.ORDER_DIRECTION_SELL,
+                    quantity=lots,
+                    stop_price=sl_quotation,
+                )
+                console.print("[green]✓ стоп-заявка размещена[/green]")
+                console.print(f"  stop_order_id: {stop_resp.stop_order_id}")
+                console.print(f"  stop_price: {sl}")
+                
+                log_event(
+                    "stop_order_placed",
+                    stop_order_id=stop_resp.stop_order_id,
+                    order_id=resp.order_id,
+                    ticker=ticker,
+                    lots=lots,
+                    stop_price=sl,
+                    direction="SELL",
+                )
+            except Exception as e:
+                console.print(f"[red]✗ не удалось разместить стоп-заявку: {e}[/red]")
+                console.print("[yellow]Основная заявка выполнена, но стоп-заявка не размещена[/yellow]")
 
 
 @app.command(name="order-sell")
@@ -525,6 +561,9 @@ def order_sell(
         None, "--client-order-id", help="ID заявки для идемпотентности (UUIDv4)"
     ),
     tif: Optional[str] = typer.Option(None, "--tif", help="Time-in-force: ioc|fok|gtc"),
+    sl: Optional[float] = typer.Option(
+        None, "--sl", help="Stop-loss цена (автоматически разместит стоп-заявку)"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
     no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
@@ -600,6 +639,39 @@ def order_sell(
             price=price,
             direction="SELL",
         )
+        
+        # Размещаем стоп-заявку если указан --sl (#24)
+        if sl is not None:
+            console.print(f"\n[yellow]Размещаю стоп-заявку на {sl}...[/yellow]")
+            sl_units = int(sl)
+            sl_nano = int(round((sl - sl_units) * 1e9))
+            sl_quotation = Quotation(units=sl_units, nano=sl_nano)
+            
+            try:
+                # Для SELL заявки стоп-заявка будет на BUY (защита от роста)
+                stop_resp = br.place_stop_order(
+                    account_id=account.id,
+                    figi=figi,
+                    direction=OrderDirection.ORDER_DIRECTION_BUY,
+                    quantity=lots,
+                    stop_price=sl_quotation,
+                )
+                console.print("[green]✓ стоп-заявка размещена[/green]")
+                console.print(f"  stop_order_id: {stop_resp.stop_order_id}")
+                console.print(f"  stop_price: {sl}")
+                
+                log_event(
+                    "stop_order_placed",
+                    stop_order_id=stop_resp.stop_order_id,
+                    order_id=resp.order_id,
+                    ticker=ticker,
+                    lots=lots,
+                    stop_price=sl,
+                    direction="BUY",
+                )
+            except Exception as e:
+                console.print(f"[red]✗ не удалось разместить стоп-заявку: {e}[/red]")
+                console.print("[yellow]Основная заявка выполнена, но стоп-заявка не размещена[/yellow]")
 
 
 @app.command(name="order-cancel")
