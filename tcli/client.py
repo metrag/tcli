@@ -453,6 +453,57 @@ f"варианты: {available}"
             'operations': fee_operations,
         }
 
+    def export_operations(
+        self,
+        account_id: str,
+        from_: Optional[Any] = None,
+        to: Optional[Any] = None,
+        export_type: str = "trades",
+    ) -> list[dict]:
+        """Экспорт операций для дневника сделок (#37 из TODO.md)."""
+        from .render import money_to_float
+        
+        # Получаем все операции за период
+        ops = self.operations(account_id=account_id, from_=from_, to=to)
+        
+        # Фильтруем и форматируем операции
+        rows = []
+        for op in ops:
+            # Получаем тип операции
+            op_type = getattr(op, 'operation_type', None)
+            op_type_name = getattr(op_type, 'name', str(op_type)) if op_type else ''
+            
+            # Фильтр по типу экспорта
+            if export_type == "trades":
+                # Только торговые операции (покупка/продажа)
+                if op_type_name not in ('OPERATION_TYPE_BUY', 'OPERATION_TYPE_SELL'):
+                    continue
+            elif export_type == "pnl":
+                # Все операции включая комиссии
+                pass
+            
+            # Извлекаем данные
+            figi = getattr(op, 'figi', '')
+            quantity = getattr(op, 'quantity', 0)
+            payment = getattr(op, 'payment', None)
+            price = getattr(op, 'price', None)
+            currency = getattr(op, 'currency', 'RUB')
+            
+            amount = money_to_float(payment) if payment else 0.0
+            price_float = money_to_float(price) if price else 0.0
+            
+            rows.append({
+                'date': str(getattr(op, 'date', '')),
+                'figi': figi,
+                'operation_type': op_type_name,
+                'quantity': quantity,
+                'price': price_float,
+                'amount': amount,
+                'currency': currency,
+            })
+        
+        return rows
+
     # -- Песочница: пополнение --------------------------------------------
 
     def payin(self, account_id: str, amount: float) -> Any:

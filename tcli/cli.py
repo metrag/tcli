@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import csv
-import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from pathlib import Path
 from typing import Any, Optional
 
 import typer
@@ -349,6 +346,112 @@ def fees(
                 console.print(f"  {currency}: {amount:.2f}")
             
             console.print(f"\n[bold]Общая сумма: {fees_info['total_fees']:.2f}[/bold]")
+
+
+
+@app.command()
+@_guard
+def export(
+    export_type: str = typer.Argument(
+        "trades", help="Тип экспорта: trades (сделки) или pnl (все операции)"
+    ),
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Начальная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
+    to_date: Optional[str] = typer.Option(
+        None, "--to", help="Конечная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
+    output: str = typer.Option(
+        "export.csv", "--output", "-o", help="Файл для экспорта (CSV или JSON)"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
+) -> None:
+    """Экспорт дневника сделок в CSV/JSON (#37 из TODO.md)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    # Валидация типа экспорта
+    if export_type not in ("trades", "pnl"):
+        _fail(f"неверный тип экспорта: {export_type} (используйте trades или pnl)", code=2)
+    
+    # Валидация формата файла
+    if not (output.endswith('.json') or output.endswith('.csv')):
+        _fail(f"неподдерживаемый формат файла: {output} (используйте .json или .csv)", code=2)
+    
+    # Парсинг дат
+    now = datetime.now(timezone.utc)
+    if to_date:
+        try:
+            if "T" in to_date:
+                to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+            else:
+                to_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(f"неверный формат --to: {to_date}", code=2)
+    else:
+        to_dt = now
+    
+    if from_date:
+        try:
+            if "T" in from_date:
+                from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            else:
+                from_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(f"неверный формат --from: {from_date}", code=2)
+    else:
+        # По умолчанию - последние 30 дней
+        from_dt = to_dt - timedelta(days=30)
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        # Получаем операции
+        rows = br.export_operations(
+            account_id=account.id,
+            from_=from_dt,
+            to=to_dt,
+            export_type=export_type,
+        )
+        
+        if not rows:
+            if json_output:
+                print_json(data=[], contour=settings.contour.value, account=account.id)
+            else:
+                console.print("операций нет")
+            raise typer.Exit(0)
+        
+        # Экспорт в файл
+        if output.endswith('.json'):
+            import json
+            with open(output, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "type": export_type,
+                    "from": from_dt.isoformat(),
+                    "to": to_dt.isoformat(),
+                    "operations": rows
+                }, f, ensure_ascii=False, indent=2)
+        elif output.endswith('.csv'):
+            import csv
+            fieldnames = ['date', 'figi', 'operation_type', 'quantity', 'price', 'amount', 'currency']
+            with open(output, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+        else:
+            _fail(f"неподдерживаемый формат файла: {output} (используйте .json или .csv)", code=2)
+        
+        if json_output:
+            result = {
+                "type": export_type,
+                "from": from_dt.isoformat(),
+                "to": to_dt.isoformat(),
+                "count": len(rows),
+                "file": output
+            }
+            print_json(data=result, contour=settings.contour.value, account=account.id)
+        else:
+            console.print(f"[green]Экспортировано {len(rows)} операций в {output}[/green]")
 
 
 @app.command()
@@ -1643,93 +1746,6 @@ def instruments(
 
 
 # -- Новые команды: Export, Watchlist, Help, Account-Select, Info ------------
-
-
-@app.command()
-@_guard
-def export(
-    data_type: str = typer.Argument(..., help="Тип данных: positions, operations, orders"),
-    format: str = typer.Option("csv", "--format", "-f", help="Формат: csv, json"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Путь к файлу (по умолчанию stdout)"),
-    from_date: Optional[str] = typer.Option(None, "--from", help="Дата начала (YYYY-MM-DD) для operations"),
-    to_date: Optional[str] = typer.Option(None, "--to", help="Дата окончания (YYYY-MM-DD) для operations"),
-) -> None:
-    """Экспорт данных в CSV/JSON."""
-    if data_type not in ("positions", "operations", "orders"):
-        _fail(f"неизвестный тип данных: {data_type} (допустимо: positions, operations, orders)", code=2)
-    if format not in ("csv", "json"):
-        _fail(f"неизвестный формат: {format} (допустимо: csv, json)", code=2)
-    
-    settings = _settings()
-    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
-    
-    with _open_broker(settings) as br:
-        account = br.pick_account()
-        rows = []
-        
-        if data_type == "positions":
-            portfolio = br.portfolio(account.id)
-            if not portfolio.positions:
-                console.print("позиций нет")
-                raise typer.Exit(0)
-            for p in portfolio.positions:
-                rows.append(Broker.position_row(p))
-        
-        elif data_type == "operations":
-            from_dt = None
-            to_dt = None
-            if from_date:
-                from_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            if to_date:
-                to_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            
-            operations = br.operations(account_id=account.id, from_=from_dt, to=to_dt)
-            if not operations:
-                console.print("операций нет")
-                raise typer.Exit(0)
-            
-            for op in operations:
-                op_ticker = br.ticker(op.figi) if op.figi else ""
-                rows.append(Broker.operation_row(op, op_ticker))
-        
-        elif data_type == "orders":
-            orders = br.orders(account.id)
-            if not orders:
-                console.print("активных заявок нет")
-                raise typer.Exit(0)
-            for o in orders:
-                rows.append(Broker.order_row(o, br.ticker(o.figi)))
-        
-        # Экспорт в файл или stdout
-        import sys
-        out_stream = open(output, "w", encoding="utf-8") if output else sys.stdout
-        
-        try:
-            if format == "csv":
-                if rows:
-                    writer = csv.DictWriter(out_stream, fieldnames=rows[0].keys())
-                    writer.writeheader()
-                    writer.writerows(rows)
-            else:  # json
-                # Преобразуем все значения в строки для JSON
-                json_rows = []
-                for row in rows:
-                    json_row = {}
-                    for k, v in row.items():
-                        if hasattr(v, "units"):  # MoneyValue/Quotation
-                            json_row[k] = f"{v.units}.{abs(v.nano):09d}"
-                        else:
-                            json_row[k] = v
-                    json_rows.append(json_row)
-                json.dump(json_rows, out_stream, indent=2, ensure_ascii=False, default=str)
-        finally:
-            if output:
-                out_stream.close()
-        
-        if output:
-            console.print(f"[green]экспортировано {len(rows)} записей в {output}[/green]")
-        else:
-            console.print()  # пустая строка после вывода
 
 
 @app.command()

@@ -167,17 +167,17 @@ def test_info_command_no_token():
 
 
 def test_export_invalid_data_type():
-    """Тест команды export с неверным типом данных."""
+    """Тест команды export с неверным типом экспорта."""
     result = runner.invoke(app, ["export", "invalid"])
     assert result.exit_code == 2
-    assert "неизвестный тип данных" in result.output
+    assert "неверный тип экспорта" in result.output
 
 
 def test_export_invalid_format():
-    """Тест команды export с неверным форматом."""
-    result = runner.invoke(app, ["export", "positions", "--format", "xml"])
+    """Тест команды export с неверным расширением файла."""
+    result = runner.invoke(app, ["export", "trades", "--output", "test.xml"])
     assert result.exit_code == 2
-    assert "неизвестный формат" in result.output
+    assert "неподдерживаемый формат" in result.output
 
 
 def test_help_includes_new_commands():
