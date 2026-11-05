@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values
 
 # Корень проекта: <project>/tcli/config.py -> <project>
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -79,8 +79,75 @@ class Settings:
 
 
 def set_env_value(key: str, value: str, env_path: Optional[Path] = None) -> None:
-    """Записать/обновить значение в .env (создаёт файл, если отсутствует)."""
+    """Записать/обновить значение в .env (создаёт файл, если отсутствует).
+    
+    Атомарная операция с flock для защиты от параллельных записей.
+    """
+    import fcntl
+    import tempfile
+    
     path = env_path or ENV_PATH
-    if not path.exists():
-        path.touch()
-    set_key(str(path), key, value)
+    lock_path = path.with_suffix('.lock')
+    
+    # Создаём lock файл
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, 'w') as lock_file:
+        try:
+            # Захватываем эксклюзивную блокировку
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            
+            # Читаем текущее содержимое
+            lines = []
+            if path.exists():
+                with open(path) as f:
+                    lines = f.readlines()
+            
+            # Обновляем или добавляем ключ
+            found = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith(f'{key}=') or stripped.startswith(f'export {key}='):
+                    # Сохраняем комментарий, если есть
+                    if '=' in line:
+                        comment_part = ''
+                        if '#' in line:
+                            comment_idx = line.index('#')
+                            eq_idx = line.index('=')
+                            if comment_idx > eq_idx:
+                                comment_part = ' ' + line[comment_idx:]
+                        lines[i] = f'{key}={value}{comment_part}\n'
+                        found = True
+                    break
+            
+            if not found:
+                # Добавляем новую строку
+                if lines and not lines[-1].endswith('\n'):
+                    lines[-1] += '\n'
+                lines.append(f'{key}={value}\n')
+            
+            # Записываем во временный файл в той же директории
+            with tempfile.NamedTemporaryFile(
+                mode='w', 
+                dir=path.parent, 
+                delete=False, 
+                suffix='.tmp'
+            ) as tmp:
+                tmp.writelines(lines)
+                tmp_path = Path(tmp.name)
+            
+            # Атомарная замена
+            os.replace(tmp_path, path)
+            
+            # Сохраняем права доступа оригинала
+            if path.exists():
+                tmp_path.chmod(0o600)  # Чтение/запись только для владельца
+            
+        finally:
+            # Блокировка освобождается автоматически при закрытии файла
+            pass
+    
+    # Удаляем lock файл (не критично, если не получится)
+    try:
+        lock_path.unlink(missing_ok=True)
+    except Exception:
+        pass
