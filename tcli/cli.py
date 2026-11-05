@@ -59,6 +59,7 @@ app = typer.Typer(
 # Глобальные переменные для общих флагов
 _global_account: Optional[str] = None
 _env_override: Optional[Path] = None
+_read_only: bool = False
 
 
 @app.callback()
@@ -73,10 +74,15 @@ def main_callback(
         "--env",
         help="Путь к .env файлу (или TCLI_ENV_PATH)",
     ),
+    read_only: bool = typer.Option(
+        False,
+        "--read-only",
+        help="Режим только чтения (запрет на изменение контура и счёта)",
+    ),
 ) -> None:
     """Глобальный callback для обработки общих флагов."""
     import os
-    global _global_account, _env_override
+    global _global_account, _env_override, _read_only
     _global_account = account
     # --env имеет приоритет над TCLI_ENV_PATH
     if env:
@@ -85,6 +91,8 @@ def main_callback(
         _env_override = Path(os.environ["TCLI_ENV_PATH"])
     else:
         _env_override = None
+    # --read-only или TCLI_READ_ONLY=1
+    _read_only = read_only or os.environ.get("TCLI_READ_ONLY") == "1"
 
 def _settings() -> Settings:
     settings = Settings.load(env_path=_env_override)
@@ -795,6 +803,10 @@ def change_mode(
         tcli change-mode live --yes
         tcli change-mode live --no-prompt
     """
+    # Проверка режима только чтения (#5)
+    if _read_only:
+        _fail("режим только чтения: изменение контура запрещено (TCLI_READ_ONLY=1 или --read-only)", code=1)
+    
     settings = _settings()
     current_contour = settings.contour
 
@@ -2129,6 +2141,10 @@ def watchlist(
 @_guard
 def account_select() -> None:
     """Интерактивный выбор активного счёта."""
+    # Проверка режима только чтения (#5)
+    if _read_only:
+        _fail("режим только чтения: выбор счёта запрещён (TCLI_READ_ONLY=1 или --read-only)", code=1)
+    
     settings = _settings()
     header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
     
