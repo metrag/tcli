@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -57,9 +58,28 @@ app = typer.Typer(
     help="tcli — CLI для Tinkoff Invest API. Поддержка SANDBOX и LIVE контуров.",
 )
 
+# Глобальная переменная для хранения значения --account (#27)
+_global_account: Optional[str] = None
+
+
+@app.callback()
+def main_callback(
+    account: Optional[str] = typer.Option(
+        None,
+        "--account",
+        help="Выбор счёта для этой команды (имя или ID)",
+    ),
+) -> None:
+    """Глобальный callback для обработки общих флагов."""
+    global _global_account
+    _global_account = account
 
 def _settings() -> Settings:
-    return Settings.load()
+    settings = Settings.load()
+    # Применяем глобальный флаг --account (#27)
+    if _global_account:
+        settings.account_override = _global_account
+    return settings
 
 
 def _open_broker(settings: Settings) -> Broker:
@@ -233,7 +253,7 @@ def positions(json_output: bool = typer.Option(False, "--json", help="Вывод
         portfolio = br.portfolio(account.id)
         if not portfolio.positions:
             if json_output:
-                print_json(data=[], contour=settings.contour.value, account=account.name or account.id)
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print("позиций нет")
             raise typer.Exit(0)
@@ -255,7 +275,7 @@ def orders(json_output: bool = typer.Option(False, "--json", help="Вывод в
         active = br.orders(account.id)
         if not active:
             if json_output:
-                print_json(data=[], contour=settings.contour.value, account=account.name or account.id)
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print("активных заявок нет")
             raise typer.Exit(0)
@@ -412,6 +432,10 @@ def order_buy(
     ticker: str = typer.Argument(..., help="Тикер инструмента"),
     lots: int = typer.Argument(..., help="Количество лотов"),
     price: Optional[float] = typer.Option(None, "--price", help="Лимитная цена (иначе рыночная)"),
+    client_order_id: Optional[str] = typer.Option(
+        None, "--client-order-id", help="ID заявки для идемпотентности (UUIDv4)"
+    ),
+    tif: Optional[str] = typer.Option(None, "--tif", help="Time-in-force: ioc|fok|gtc"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
     no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
@@ -449,6 +473,23 @@ def order_buy(
         
         from tinkoff.invest.schemas import OrderType
         
+        # Time-in-force mapping
+        time_in_force = None
+        if tif:
+            from tinkoff.invest.schemas import TimeInForceType
+            tif_map = {
+                "ioc": TimeInForceType.TIME_IN_FORCE_FILL_AND_KILL,
+                "fok": TimeInForceType.TIME_IN_FORCE_FILL_OR_KILL,
+                "gtc": TimeInForceType.TIME_IN_FORCE_GOOD_TILL_DATE,
+            }
+            if tif.lower() not in tif_map:
+                _fail(f"неизвестный tif: {tif} (допустимо: ioc|fok|gtc)", code=2)
+            time_in_force = tif_map[tif.lower()]
+        
+        # Auto-generate client_order_id if not provided (#45)
+        if client_order_id is None:
+            client_order_id = str(uuid.uuid4())
+        
         resp = br.place_order(
             account_id=account.id,
             figi=figi,
@@ -456,6 +497,8 @@ def order_buy(
             quantity=lots,
             price=price_quotation,
             order_type=order_type,
+            order_id=client_order_id,
+            time_in_force=time_in_force,
         )
         
         console.print("[green]заявка выставлена[/green]")
@@ -478,6 +521,10 @@ def order_sell(
     ticker: str = typer.Argument(..., help="Тикер инструмента"),
     lots: int = typer.Argument(..., help="Количество лотов"),
     price: Optional[float] = typer.Option(None, "--price", help="Лимитная цена (иначе рыночная)"),
+    client_order_id: Optional[str] = typer.Option(
+        None, "--client-order-id", help="ID заявки для идемпотентности (UUIDv4)"
+    ),
+    tif: Optional[str] = typer.Option(None, "--tif", help="Time-in-force: ioc|fok|gtc"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
     no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
 ) -> None:
@@ -513,6 +560,23 @@ def order_sell(
             nano = int(round((price - units) * 1e9))
             price_quotation = Quotation(units=units, nano=nano)
         
+        # Time-in-force mapping
+        time_in_force = None
+        if tif:
+            from tinkoff.invest.schemas import TimeInForceType
+            tif_map = {
+                "ioc": TimeInForceType.TIME_IN_FORCE_FILL_AND_KILL,
+                "fok": TimeInForceType.TIME_IN_FORCE_FILL_OR_KILL,
+                "gtc": TimeInForceType.TIME_IN_FORCE_GOOD_TILL_DATE,
+            }
+            if tif.lower() not in tif_map:
+                _fail(f"неизвестный tif: {tif} (допустимо: ioc|fok|gtc)", code=2)
+            time_in_force = tif_map[tif.lower()]
+        
+        # Auto-generate client_order_id if not provided (#45)
+        if client_order_id is None:
+            client_order_id = str(uuid.uuid4())
+        
         resp = br.place_order(
             account_id=account.id,
             figi=figi,
@@ -520,6 +584,8 @@ def order_sell(
             quantity=lots,
             price=price_quotation,
             order_type=order_type,
+            order_id=client_order_id,
+            time_in_force=time_in_force,
         )
         
         console.print("[green]заявка выставлена[/green]")
@@ -632,7 +698,7 @@ def quote(
                 "price": str(last.price),
                 "time": str(last.time)
             }
-            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
+            print_json(data=result, contour=settings.contour.value, account="")
         else:
             console.print(f"\n[bold]{ticker}[/bold] (FIGI: {figi})")
             console.print(f"  Последняя цена: {fmt_money(last.price)}")
@@ -1256,15 +1322,14 @@ def watchlist(
     """Управление списком отслеживаемых инструментов (избранное)."""
     if action is None or action == "list":
         # Показать текущие цены всех инструментов из watchlist
+        settings = _settings()
         tickers = load_watchlist()
         if not tickers:
             if json_output:
-                print_json(data=[], contour=settings.contour.value, account=account.name or account.id)
+                print_json(data=[], contour=settings.contour.value, account="")
             else:
                 console.print("watchlist пуст — добавьте инструменты: tcli watchlist add SBER")
             raise typer.Exit(0)
-        
-        settings = _settings()
         if not json_output:
             header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
         
@@ -1311,7 +1376,11 @@ def watchlist(
         if result:
             log_event("watchlist_add", ticker=ticker.upper())
         if json_output:
-            print_json(data={"action": "add", "ticker": ticker.upper(), "added": result}, contour=settings.contour.value, account="")
+            print_json(
+                data={"action": "add", "ticker": ticker.upper(), "added": result},
+                contour=settings.contour.value,
+                account="",
+            )
         else:
             if result:
                 console.print(f"[green]добавлено в watchlist:[/green] {ticker.upper()}")
@@ -1325,7 +1394,11 @@ def watchlist(
         if result:
             log_event("watchlist_remove", ticker=ticker.upper())
         if json_output:
-            print_json(data={"action": "remove", "ticker": ticker.upper(), "removed": result}, contour=settings.contour.value, account="")
+            print_json(
+                data={"action": "remove", "ticker": ticker.upper(), "removed": result},
+                contour=settings.contour.value,
+                account="",
+            )
         else:
             if result:
                 console.print(f"[green]удалено из watchlist:[/green] {ticker.upper()}")
@@ -1709,7 +1782,7 @@ def estimate(
                 result["commission"] = {"error": str(exc)}
         
         if json_output:
-            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
+            print_json(data=result, contour=settings.contour.value, account="")
         else:
             console.print("\n[bold]Оценка заявки:[/bold]")
             console.print(f"  Инструмент: {result['ticker']} (FIGI: {result['figi']})")
@@ -1784,7 +1857,11 @@ def close(
         log_event("position_closed", ticker=ticker, figi=figi, quantity=quantity)
         
         if json_output:
-            print_json(data={"order_id": result.order_id, "ticker": ticker}, contour=settings.contour.value, account=account.name or account.id)
+            print_json(
+                data={"order_id": result.order_id, "ticker": ticker},
+                contour=settings.contour.value,
+                account=account.name or account.id,
+            )
 
 
 @app.command()
@@ -1837,7 +1914,11 @@ def close_all(
         log_event("all_positions_closed", count=len(closed))
         
         if json_output:
-            print_json(data={"closed": closed}, contour=settings.contour.value, account=account.name or account.id)
+            print_json(
+                data={"closed": closed},
+                contour=settings.contour.value,
+                account=account.name or account.id,
+            )
 
 
 @app.command()
@@ -1859,7 +1940,11 @@ def cancel_all(
         log_event("all_orders_canceled", count=result.orders_canceled)
         
         if json_output:
-            print_json(data={"canceled": result.orders_canceled}, contour=settings.contour.value, account=account.name or account.id)
+            print_json(
+            data={"canceled": result.orders_canceled},
+            contour=settings.contour.value,
+            account=account.name or account.id,
+        )
 
 
 @app.command()
@@ -1929,7 +2014,11 @@ def stop_order_list(
             })
         
         if json_output:
-            print_json(data={"stop_orders": rows}, contour=settings.contour.value, account=account.name or account.id)
+            print_json(
+            data={"stop_orders": rows},
+            contour=settings.contour.value,
+            account=account.name or account.id,
+        )
         else:
             print_stop_orders(rows)
 
@@ -1961,7 +2050,11 @@ def stop_order_cancel(
         log_event("stop_order_cancelled", stop_order_id=stop_order_id)
         
         if json_output:
-            print_json(data={"cancelled": stop_order_id}, contour=settings.contour.value, account=account.name or account.id)
+            print_json(
+            data={"cancelled": stop_order_id},
+            contour=settings.contour.value,
+            account=account.name or account.id,
+        )
 
 
 @app.command()
@@ -2046,7 +2139,7 @@ def stop_order_place(
                 "stop_price": str(stop_price_quotation),
                 "price": str(price_quotation) if price_quotation else "market",
             }
-            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
+            print_json(data=result, contour=settings.contour.value, account="")
         else:
             console.print("\n[green]стоп-заявка размещена[/green]")
             console.print(f"  stop_order_id: {stop_order_id}")
@@ -2080,7 +2173,11 @@ def stop_order_cancel_all(
         
         if count == 0:
             if json_output:
-                print_json(data={"cancelled_count": 0, "cancelled_ids": []}, contour=settings.contour.value, account=account.name or account.id)
+                print_json(
+                    data={"cancelled_count": 0, "cancelled_ids": []},
+                    contour=settings.contour.value,
+                    account=account.name or account.id,
+                )
             else:
                 console.print("активных стоп-заявок нет")
             raise typer.Exit(0)
@@ -2104,7 +2201,7 @@ def stop_order_cancel_all(
                 "cancelled_count": cancelled_count,
                 "cancelled_ids": cancelled_ids
             }
-            print_json(data=result, contour=settings.contour.value, account=account.name or account.id)
+            print_json(data=result, contour=settings.contour.value, account="")
         else:
             console.print(f"[green]отменено стоп-заявок:[/green] {cancelled_count} из {count}")
             for stop_id in cancelled_ids:
@@ -2130,7 +2227,11 @@ def free_cash(
         currency = getattr(cash, "currency", "RUB") if cash else "RUB"
         
         if json_output:
-            print_json(data={"amount": amount, "currency": currency}, contour=settings.contour.value, account=account.name or account.id)
+            print_json(
+                data={"amount": amount, "currency": currency},
+                contour=settings.contour.value,
+                account=account.name or account.id,
+            )
         else:
             console.print(f"[bold]Свободные средства:[/bold] {amount:,.2f} {currency}")
 
@@ -2192,7 +2293,11 @@ def is_market_open(
         open_status = br.is_market_open(figi)
         
         if json_output:
-            print_json(data={"ticker": ticker, "figi": figi, "market_open": open_status}, contour=settings.contour.value, account=account.name or account.id)
+            print_json(
+                data={"ticker": ticker, "figi": figi, "market_open": open_status},
+                contour=settings.contour.value,
+                account="",
+            )
         else:
             if open_status:
                 console.print(f"[green]✓ рынок открыт:[/green] {ticker}")

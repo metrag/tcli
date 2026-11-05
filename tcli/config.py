@@ -34,6 +34,7 @@ class Settings:
     sandbox_token: str = ""  # Для песочницы
     main_token: str = ""  # Для боевого контура
     sandbox_account_name: str = ""
+    account_override: str = ""  # Глобальный флаг --account (#27)
     contour: Contour = Contour.SANDBOX
     env_path: Path = field(default_factory=lambda: ENV_PATH)
 

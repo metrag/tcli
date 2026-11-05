@@ -184,6 +184,17 @@ class Broker:
             raise NoAccountsError(
                 f"нет счетов — создайте счёт в {'песочнице' if self.is_sandbox else 'боевом контуре'}"
             )
+        # Приоритет 1: глобальный флаг --account (#27)
+        if self._settings.account_override:
+            account_filter = self._settings.account_override
+            matched = [a for a in accounts if a.name == account_filter or a.id == account_filter]
+            if not matched:
+                available = ", ".join(a.name or a.id for a in accounts)
+                raise NoAccountsError(
+                f"счёт «{self._settings.account_override}» не найден; есть: {available}"
+            )
+            return matched[0]
+        # Приоритет 2: SANDBOX_ACCOUNT_NAME из .env
         name = self._settings.sandbox_account_name
         if name:
             matched = [a for a in accounts if a.name == name]
@@ -195,7 +206,8 @@ class Broker:
             return accounts[0]
         available = ", ".join(a.name or a.id for a in accounts)
         raise AmbiguousAccountError(
-            f"несколько счетов — задайте SANDBOX_ACCOUNT_NAME в .env; варианты: {available}"
+            f"несколько счетов — задайте SANDBOX_ACCOUNT_NAME в .env или используйте --account; "
+f"варианты: {available}"
         )
 
     def create_account(self, name: str = "") -> Any:
@@ -231,17 +243,22 @@ class Broker:
         quantity: int,
         price: Optional[Quotation] = None,
         order_type: OrderType = OrderType.ORDER_TYPE_LIMIT,
+        order_id: Optional[str] = None,
+        time_in_force: Optional[Any] = None,
     ) -> Any:
-        return with_retries(
-            lambda: self._client.orders.post_order(
-                account_id=account_id,
-                figi=figi,
-                direction=direction,
-                quantity=quantity,
-                price=price,
-                order_type=order_type,
-            )
-        )
+        kwargs = {
+            "account_id": account_id,
+            "figi": figi,
+            "direction": direction,
+            "quantity": quantity,
+            "price": price,
+            "order_type": order_type,
+        }
+        if order_id is not None:
+            kwargs["order_id"] = order_id
+        if time_in_force is not None:
+            kwargs["time_in_force"] = time_in_force
+        return with_retries(lambda: self._client.orders.post_order(**kwargs))
 
     def cancel_order(self, account_id: str, order_id: str) -> Any:
         return with_retries(
