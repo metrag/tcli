@@ -13,12 +13,12 @@
 
 | № | Функция | Описание | Параметры | P |
 |---|---------|----------|-----------|---|
-| 1 | 🆕 `orderbook` / `get_orderbook()` | Снапшот стакана: уровни bid/ask, спред, глубина, last price | `TICKER`, `--depth 10\|20\|50`, `--json` | **P0** |
-| 2 | 🔧 `candles` — `--interval 4h` | Склеивание 4×1h в 4-часовые свечи (границы 00/04/08… мск). Сейчас 4ч недоступен | `-i 4h` | **P0** |
-| 3 | 🔧 `candles` — `--session day\|evening\|all` | Раздельные свечи по сессиям (день ≠ вечер, не склеивать) | `--session` | **P0** |
-| 4 | 🔧 `candles` — `--from/--to` | Строгий период вместо `--days` + внутренняя пагинация (API режет ответы) | `--from`, `--to` | **P0** |
-| 5 | 🆕 `trading-status` / `get_trading_status()` | Текущий статус торгов: открыт / аукцион / закрыт. Гарант «не лезть в закрытый рынок» | `TICKER`, `--json` | **P0** |
-| 6 | 🆕 `sessions` / `get_sessions()` | Границы сессий и аукционов на дату (trading_schedules) — расписание для планировщика бота | `--date`, `--ticker`, `--json` | **P0** |
+| 1 | ✅ `orderbook` / `get_orderbook()` | Снапшот стакана: уровни bid/ask, спред, глубина, last price | `TICKER`, `--depth 10\|20\|50`, `--json` | **P0** |
+| 2 | ✅ `candles` — `--interval 4h` | Склеивание 4×1h в 4-часовые свечи (границы 00/04/08… мск). Сейчас 4ч недоступен | `-i 4h` | **P0** |
+| 3 | ✅ `candles` — `--session day\|evening\|all` | Раздельные свечи по сессиям (день ≠ вечер, не склеивать) | `--session` | **P0** |
+| 4 | ✅ `candles` — `--from/--to` | Строгий период вместо `--days` + внутренняя пагинация (API режет ответы) | `--from`, `--to` | **P0** |
+| 5 | ✅ `trading-status` / `get_trading_status()` | Текущий статус торгов: открыт / аукцион / закрыт. Гарант «не лезть в закрытый рынок» | `TICKER`, `--json` | **P0** |
+| 6 | ✅ `sessions` / `get_sessions()` | Границы сессий и аукционов на дату (trading_schedules) — расписание для планировщика бота | `--date`, `--ticker`, `--json` | **P0** |
 | 7 | 🆕 `clock` / `get_clock()` | Серверное время + дрейф локальных часов | `--json` | P1 |
 | 8 | 🆕 `stream-quote` / `subscribe_quotes()` | Живой поток last price по N тикерам (gRPC MarketDataStream) | `TICKER...` | P1 |
 | 9 | 🆕 `stream-trades` / `subscribe_trades()` | Поток сделок: цена, объём, агрессор (tape reading) | `TICKER...` | P1 |
@@ -30,15 +30,15 @@
 
 | № | Функция | Описание | Параметры | P |
 |---|---------|----------|-----------|---|
-| 13 | 🆕 `stop-place` / `place_stop_order()` | **Стоп-заявка (StopOrder API) — единственный защитный ордер при отказе от ТП.** Для лонга: stop-sell ниже входа; типы «лимит по стоп-цене» / «рынок после активации» | `TICKER`, `LOTS`, `--stop-price`, `--direction`, `--market-limit` | **P0** |
-| 14 | 🆕 `stop-list` / `get_stop_orders()` | Активные стоп-заявки | `--json` | **P0** |
-| 15 | 🆕 `stop-cancel` / `cancel_stop_order()` | Отмена стопа по ID | `STOP_ID` | **P0** |
-| 16 | 🆕 `stop-cancel-all` / `cancel_stop_all()` | Отмена всех стопов (снять старый SL перед новым входом) | `[--ticker]` | **P0** |
-| 17 | 🔧 `order-info` (CLI; в skills есть) | Статус заявки по ID: NEW/PARTIAL/FILL/CANCELLED, исполнено лотов | `ORDER_ID`, `--json` | **P0** |
-| 18 | 🆕 `order-cancel-all` / `cancel_all()` | Массовая отмена: конец сессии, разрыв связи, смена сигнала | `[--ticker]` | **P0** |
-| 19 | 🆕 `close` / `close_position()` | Закрытие позиции с автоподсчётом лотов (выход по сигналу) | `TICKER`, `--market\|--price` | **P0** |
-| 20 | 🆕 `close-all` / `flatten_all()` | Закрытие всех позиций — EOD-flatten в конец вечерней сессии | `--no-prompt` | **P0** |
-| 21 | 🆕 `estimate` / `estimate_cost()` | До отправки: стоимость + комиссия + хватает ли cash (контроль «без плеча»). Отказ с кодом `INSUFFICIENT_FUNDS` | `TICKER`, `LOTS`, `--side`, `--json` | **P0** |
+| 13 | ✅ `stop-place` / `place_stop_order()` | **Стоп-заявка (StopOrder API) — единственный защитный ордер при отказе от ТП.** Для лонга: stop-sell ниже входа; типы «лимит по стоп-цене» / «рынок после активации» | `TICKER`, `LOTS`, `--stop-price`, `--direction`, `--market-limit` | **P0** |
+| 14 | ✅ `stop-list` / `get_stop_orders()` | Активные стоп-заявки | `--json` | **P0** |
+| 15 | ✅ `stop-cancel` / `cancel_stop_order()` | Отмена стопа по ID | `STOP_ID` | **P0** |
+| 16 | ✅ `stop-cancel-all` / `cancel_stop_all()` | Отмена всех стопов (снять старый SL перед новым входом) | `[--ticker]` | **P0** |
+| 17 | ✅ `order-info` (CLI; в skills есть) | Статус заявки по ID: NEW/PARTIAL/FILL/CANCELLED, исполнено лотов | `ORDER_ID`, `--json` | **P0** |
+| 18 | ✅ `order-cancel-all` / `cancel_all()` | Массовая отмена: конец сессии, разрыв связи, смена сигнала | `[--ticker]` | **P0** |
+| 19 | ✅ `close` / `close_position()` | Закрытие позиции с автоподсчётом лотов (выход по сигналу) | `TICKER`, `--market\|--price` | **P0** |
+| 20 | ✅ `close-all` / `flatten_all()` | Закрытие всех позиций — EOD-flatten в конец вечерней сессии | `--no-prompt` | **P0** |
+| 21 | ✅ `estimate` / `estimate_cost()` | До отправки: стоимость + комиссия + хватает ли cash (контроль «без плеча»). Отказ с кодом `INSUFFICIENT_FUNDS` | `TICKER`, `LOTS`, `--side`, `--json` | **P0** |
 | 22 | 🔧 `order-buy/sell` — `--client-order-id` | Идемпотентность: ретрай не плодит дубли ордеров | `--client-order-id` | P1 |
 | 23 | 🔧 `order-buy/sell` — `--tif ioc\|fok\|gtc` | Time-in-force: агрессивный вход IOC, пассивный GTC | `--tif` | P1 |
 | 24 | 🔧 `order-buy/sell` — `--sl PRICE` | Связка «вход + стоп-лосс» одной командой (откат обеих при отказе) | `--sl` | P1 |
@@ -65,7 +65,7 @@
 
 | № | Функция | Описание | P |
 |---|---------|----------|---|
-| 36 | 🆕 `pnl` / `get_pnl()` | Round-trip P&L за период: вход, выход, комиссия, чистый итог; `--by-day`, `--by-ticker`, winrate | **P0** |
+| 36 | ✅ `pnl` / `get_pnl()` | Round-trip P&L за период: вход, выход, комиссия, чистый итог; `--by-day`, `--by-ticker`, winrate | **P0** |
 | 37 | 🔧 `export` — типы `pnl`, `trades` | Выгрузка дневника сделок в CSV/JSON | P1 |
 | 38 | 🆕 `fees --from --to` | Итог комиссий за период (не съедает ли тариф скальпинг) | P2 |
 
