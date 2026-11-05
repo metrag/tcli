@@ -39,12 +39,12 @@
 | 19 | ✅ `close` / `close_position()` | Закрытие позиции с автоподсчётом лотов (выход по сигналу) | `TICKER`, `--market\|--price` | **P0** |
 | 20 | ✅ `close-all` / `flatten_all()` | Закрытие всех позиций — EOD-flatten в конец вечерней сессии | `--no-prompt` | **P0** |
 | 21 | ✅ `estimate` / `estimate_cost()` | До отправки: стоимость + комиссия + хватает ли cash (контроль «без плеча»). Отказ с кодом `INSUFFICIENT_FUNDS` | `TICKER`, `LOTS`, `--side`, `--json` | **P0** |
-| 22 | 🔧 `order-buy/sell` — `--client-order-id` | Идемпотентность: ретрай не плодит дубли ордеров | `--client-order-id` | P1 |
-| 23 | 🔧 `order-buy/sell` — `--tif ioc\|fok\|gtc` | Time-in-force: агрессивный вход IOC, пассивный GTC | `--tif` | P1 |
+| 22 | ✅ `order-buy/sell` — `--client-order-id` | Идемпотентность: ретрай не плодит дубли ордеров | `--client-order-id` | P1 |
+| 23 | ✅ `order-buy/sell` — `--tif ioc\|fok\|gtc` | Time-in-force: агрессивный вход IOC, пассивный GTC | `--tif` | P1 |
 | 24 | 🔧 `order-buy/sell` — `--sl PRICE` | Связка «вход + стоп-лосс» одной командой (откат обеих при отказе) | `--sl` | P1 |
 | 25 | 🆕 `order-modify` / `modify_order()` | Перестановка цены/количества (трейлинг стопа вручную) | `ORDER_ID`, `--price`, `--lots` | P1 |
 | 26 | 🆕 `stream-orders` / `subscribe_orders()` | Подписка на статусы заявок: филл, частичное исполнение, отмена | `--account` | P1 |
-| 27 | 🔧 глобальный `--account` | Выбор счёта в каждом вызове (не только через .env) | глобальный флаг | P1 |
+| 27 | ✅ глобальный `--account` | Выбор счёта в каждом вызове (не только через .env) | глобальный флаг | P1 |
 | 28 | 🆕 `bulk-order` / `place_orders()` | Пакетная отправка/отмена N ордеров | JSON-массив | P2 |
 
 ## Модуль 3. Risk-хелперы (только `skills/`, без CLI)
@@ -79,7 +79,7 @@
 | 42 | `AsyncBroker` — прямой gRPC | Асинхронный клиент в skills без subprocess (subprocess на каждый тик = десятки мс) | P1 |
 | 43 | Retry + rate-limit handler | Backoff для 429/сетевых ошибок | P1 |
 | 44 | Reconnect стримов | Автопереподписка + восстановление снапшота после разрыва | P1 |
-| 45 | Автогенерация `--client-order-id` | UUIDv4 по умолчанию (идемпотентность) | P1 |
+| 45 | ✅ Автогенерация `--client-order-id` | UUIDv4 по умолчанию (идемпотентность) | P1 |
 
 ---
 
