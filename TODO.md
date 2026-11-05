@@ -42,7 +42,7 @@
 | 22 | ✅ `order-buy/sell` — `--client-order-id` | Идемпотентность: ретрай не плодит дубли ордеров | `--client-order-id` | P1 |
 | 23 | ✅ `order-buy/sell` — `--tif ioc\|fok\|gtc` | Time-in-force: агрессивный вход IOC, пассивный GTC | `--tif` | P1 |
 | 24 | ✅ `order-buy/sell` — `--sl PRICE` | Связка «вход + стоп-лосс» одной командой (откат обеих при отказе) | `--sl` | P1 |
-| 25 | 🆕 `order-modify` / `modify_order()` | Перестановка цены/количества (трейлинг стопа вручную) | `ORDER_ID`, `--price`, `--lots` | P1 |
+| 25 | ✅ `order-modify` / `modify_order()` | Перестановка цены/количества (трейлинг стопа вручную) | `ORDER_ID`, `--price`, `--lots` | P1 |
 | 26 | 🆕 `stream-orders` / `subscribe_orders()` | Подписка на статусы заявок: филл, частичное исполнение, отмена | `--account` | P1 |
 | 27 | ✅ глобальный `--account` | Выбор счёта в каждом вызове (не только через .env) | глобальный флаг | P1 |
 | 28 | 🆕 `bulk-order` / `place_orders()` | Пакетная отправка/отмена N ордеров | JSON-массив | P2 |
