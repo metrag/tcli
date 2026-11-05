@@ -36,9 +36,12 @@ from .render import (
     print_instruments,
     print_instruments_filtered,
     print_operations,
+    print_orderbook,
     print_orders,
     print_positions,
+    print_stop_orders,
     print_summary,
+    print_trading_status,
     print_watchlist,
 )
 from .ssl import ENV_VAR, cert_status
@@ -1301,6 +1304,458 @@ def id_clear_cache() -> None:
     """Очистить кэш типов идентификаторов."""
     clear_cache()
     console.print("[green]кэш очищен[/green]")
+
+
+# -- Market Data: orderbook, trading_status, sessions ----------------------
+
+
+@app.command()
+@_guard
+def orderbook(
+    ticker: str = typer.Argument(..., help="Тикер или FIGI инструмента"),
+    depth: int = typer.Option(10, "--depth", "-d", help="Глубина стакана"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Стакан заявок (orderbook)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        instrument = br.find_instrument_smart(ticker)
+        figi = getattr(instrument, "figi", "")
+        if not figi:
+            _fail(f"не удалось получить FIGI для {ticker}", code=4)
+        
+        ob = br.orderbook(figi, depth=depth)
+        
+        bids = []
+        for b in ob.bids:
+            bids.append({"price": money_to_float(b.price), "quantity": b.quantity})
+        
+        asks = []
+        for a in ob.asks:
+            asks.append({"price": money_to_float(a.price), "quantity": a.quantity})
+        
+        limit_up = money_to_float(ob.limit_up)
+        limit_down = money_to_float(ob.limit_down)
+        
+        if json_output:
+            console.print_json(data={
+                "figi": figi,
+                "bids": bids,
+                "asks": asks,
+                "limit_up": limit_up,
+                "limit_down": limit_down,
+            })
+        else:
+            print_orderbook(figi, bids, asks, limit_up, limit_down)
+
+
+@app.command()
+@_guard
+def trading_status(
+    ticker: str = typer.Argument(..., help="Тикер или FIGI инструмента"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Статус торгов инструментом."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        instrument = br.find_instrument_smart(ticker)
+        figi = getattr(instrument, "figi", "")
+        if not figi:
+            _fail(f"не удалось получить FIGI для {ticker}", code=4)
+        
+        ts = br.trading_status(figi)
+        
+        status_map = {
+            "NOT_AVAILABLE_FOR_TRADING": "недоступен",
+            "OPENING_PERIOD": "открытие",
+            "CLOSING_PERIOD": "закрытие",
+            "BREAK_IN_TRADING": "перерыв",
+            "NORMAL_TRADING": "торги идут",
+            "CLOSING_AUCTION": "аукцион закрытия",
+        }
+        
+        status_text = status_map.get(ts.trading_status, ts.trading_status)
+        
+        result = {
+            "figi": figi,
+            "status": status_text,
+            "buy_available": ts.buy_available,
+            "sell_available": ts.sell_available,
+            "api_trade": ts.api_trade_available,
+        }
+        
+        if json_output:
+            console.print_json(data=result)
+        else:
+            print_trading_status(figi, result)
+
+
+@app.command()
+@_guard
+def sessions(
+    exchange: str = typer.Option("MOEX", "--exchange", "-e", help="Биржа"),
+    days: int = typer.Option(7, "--days", "-d", help="Количество дней"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Расписание торговых сессий."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        now = datetime.now(timezone.utc)
+        from_dt = now
+        to_dt = now + timedelta(days=days)
+        
+        schedules = br.trading_schedules(exchange, from_dt, to_dt)
+        
+        if not schedules:
+            console.print("[dim]расписание не найдено[/dim]")
+            raise typer.Exit(0)
+        
+        rows = []
+        for day in schedules:
+            rows.append({
+                "date": str(day.date),
+                "start": str(day.start_time) if day.start_time else "выходной",
+                "end": str(day.end_time) if day.end_time else "",
+                "is_trading": day.is_trading_day,
+            })
+        
+        if json_output:
+            console.print_json(data={"exchange": exchange, "days": rows})
+        else:
+            from rich.table import Table
+            table = Table(title=f"Расписание торгов ({exchange})")
+            table.add_column("Дата")
+            table.add_column("Начало")
+            table.add_column("Конец")
+            table.add_column("Торги")
+            
+            for row in rows:
+                status = "[green]✓[/green]" if row["is_trading"] else "[red]✗[/red]"
+                table.add_row(row["date"], row["start"], row["end"], status)
+            
+            console.print(table)
+
+
+# -- Position Management: close, cancel_all, stop_orders -------------------
+
+
+@app.command()
+@_guard
+def close(
+    ticker: str = typer.Argument(..., help="Тикер или FIGI инструмента"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Без подтверждения"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Без подтверждений"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Закрыть позицию по инструменту (рыночная заявка)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        instrument = br.find_instrument_smart(ticker)
+        figi = getattr(instrument, "figi", "")
+        if not figi:
+            _fail(f"не удалось получить FIGI для {ticker}", code=4)
+        
+        account = br.pick_account()
+        position = br.get_position(account.id, figi)
+        
+        if not position or position.balance == 0:
+            _fail(f"позиция по {ticker} не найдена или пуста", code=4)
+        
+        quantity = abs(position.balance)
+        
+        # Определить направление: если позиция в лонг — продаём, если в шорт — покупаем
+        # Но в тcli пока только лонг, значит продаём
+        direction = "SELL" if position.balance > 0 else "BUY"
+        
+        if not yes and not no_prompt:
+            console.print(f"\n[bold]Закрытие позиции:[/bold] {ticker}")
+            console.print(f"  Количество: {quantity}")
+            console.print(f"  Направление: {direction}")
+            console.print(f"  Контур: [yellow]{br.contour.value}[/yellow]")
+            confirm = typer.confirm("Подтвердить закрытие?")
+            if not confirm:
+                console.print("[red]Отменено[/red]")
+                raise typer.Exit(1)
+        
+        result = br.close_position(account.id, figi)
+        console.print(f"[green]позиция закрыта[/green]: {ticker}")
+        console.print(f"  order_id: {result.order_id}")
+        log_event("position_closed", ticker=ticker, figi=figi, quantity=quantity)
+        
+        if json_output:
+            console.print_json(data={"order_id": result.order_id, "ticker": ticker})
+
+
+@app.command()
+@_guard
+def close_all(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Без подтверждения"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Без подтверждений"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Закрыть все открытые позиции."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        portfolio = br.portfolio(account.id)
+        
+        if not portfolio.positions:
+            console.print("[dim]позиций нет[/dim]")
+            raise typer.Exit(0)
+        
+        positions_with_qty = [
+            p for p in portfolio.positions if money_to_float(p.quantity) != 0
+        ]
+        
+        if not positions_with_qty:
+            console.print("[dim]позиций с ненулевым количеством нет[/dim]")
+            raise typer.Exit(0)
+        
+        if not yes and not no_prompt:
+            console.print(f"\n[bold]Закрытие всех позиций:[/bold] {len(positions_with_qty)} шт.")
+            console.print(f"  Контур: [yellow]{br.contour.value}[/yellow]")
+            confirm = typer.confirm("Подтвердить закрытие ВСЕХ позиций?")
+            if not confirm:
+                console.print("[red]Отменено[/red]")
+                raise typer.Exit(1)
+        
+        closed = []
+        for pos in positions_with_qty:
+            figi = pos.figi
+            try:
+                result = br.close_position(account.id, figi)
+                ticker = br.ticker(figi)
+                closed.append({"ticker": ticker, "figi": figi, "order_id": result.order_id})
+                console.print(f"[green]закрыта:[/green] {ticker} (order_id: {result.order_id})")
+            except Exception as exc:
+                ticker = br.ticker(figi)
+                console.print(f"[red]ошибка при закрытии {ticker}:[/red] {api_error_text(exc)}")
+        
+        log_event("all_positions_closed", count=len(closed))
+        
+        if json_output:
+            console.print_json(data={"closed": closed})
+
+
+@app.command()
+@_guard
+def cancel_all(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Без подтверждения"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Без подтверждений"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Отменить все открытые заявки."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        result = br.cancel_all_orders(account.id)
+        
+        console.print(f"[green]заявки отменены[/green]: {result.orders_canceled} шт.")
+        log_event("all_orders_canceled", count=result.orders_canceled)
+        
+        if json_output:
+            console.print_json(data={"canceled": result.orders_canceled})
+
+
+@app.command()
+@_guard
+def order_info(
+    order_id: str = typer.Argument(..., help="ID заявки"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Информация о конкретной заявке."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        order = br.get_order_info(account.id, order_id)
+        
+        info_dict = {
+            "order_id": order.order_id,
+            "figi": order.figi,
+            "direction": order.direction.name if hasattr(order.direction, "name") else str(order.direction),
+            "quantity": order.lots_requested,
+            "executed": order.lots_executed,
+            "status": (
+                order.execution_report_status.name
+                if hasattr(order.execution_report_status, "name")
+                else str(order.execution_report_status)
+            ),
+            "price": money_to_float(order.initial_order_price),
+        }
+        
+        if json_output:
+            console.print_json(data=info_dict)
+        else:
+            console.print(f"\n[bold]Заявка[/bold] {order_id}")
+            console.print("=" * 60)
+            for key, value in info_dict.items():
+                console.print(f"  [bold]{key}:[/bold] {value}")
+            console.print()
+
+
+@app.command()
+@_guard
+def stop_order_list(
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Список стоп-заявок."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        stop_orders = br.stop_orders(account.id)
+        
+        if not stop_orders:
+            console.print("[dim]стоп-заявок нет[/dim]")
+            raise typer.Exit(0)
+        
+        rows = []
+        for so in stop_orders:
+            rows.append({
+                "id": so.stop_order_id,
+                "figi": so.figi,
+                "direction": so.direction.name if hasattr(so.direction, "name") else str(so.direction),
+                "quantity": so.lots_requested,
+                "price": money_to_float(so.price),
+                "status": so.status.name if hasattr(so.status, "name") else str(so.status),
+            })
+        
+        if json_output:
+            console.print_json(data={"stop_orders": rows})
+        else:
+            print_stop_orders(rows)
+
+
+@app.command()
+@_guard
+def stop_order_cancel(
+    stop_order_id: str = typer.Argument(..., help="ID стоп-заявки"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Без подтверждения"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Без подтверждений"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Отменить стоп-заявку."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        if not yes and not no_prompt:
+            console.print(f"\n[bold]Отмена стоп-заявки:[/bold] {stop_order_id}")
+            confirm = typer.confirm("Подтвердить отмену?")
+            if not confirm:
+                console.print("[red]Отменено[/red]")
+                raise typer.Exit(1)
+        
+        br.cancel_stop_order(account.id, stop_order_id)
+        console.print(f"[green]стоп-заявка отменена[/green]: {stop_order_id}")
+        log_event("stop_order_cancelled", stop_order_id=stop_order_id)
+        
+        if json_output:
+            console.print_json(data={"cancelled": stop_order_id})
+
+
+@app.command()
+@_guard
+def free_cash(
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Свободные средства на счёте."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        cash = br.get_free_cash(account.id)
+        
+        amount = money_to_float(cash) if cash else 0.0
+        currency = getattr(cash, "currency", "RUB") if cash else "RUB"
+        
+        if json_output:
+            console.print_json(data={"amount": amount, "currency": currency})
+        else:
+            console.print(f"[bold]Свободные средства:[/bold] {amount:,.2f} {currency}")
+
+
+@app.command()
+@_guard
+def has_position(
+    ticker: str = typer.Argument(..., help="Тикер или FIGI инструмента"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Проверить наличие позиции по инструменту."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        instrument = br.find_instrument_smart(ticker)
+        figi = getattr(instrument, "figi", "")
+        if not figi:
+            _fail(f"не удалось получить FIGI для {ticker}", code=4)
+        
+        account = br.pick_account()
+        position = br.get_position(account.id, figi)
+        
+        has_pos = position is not None and position.balance != 0
+        quantity = money_to_float(position.quantity) if position else 0.0
+        
+        if json_output:
+            console.print_json(
+                data={
+                    "ticker": ticker,
+                    "figi": figi,
+                    "has_position": has_pos,
+                    "quantity": quantity,
+                }
+            )
+        else:
+            if has_pos:
+                console.print(f"[green]✓ позиция есть:[/green] {ticker} ({quantity} шт.)")
+            else:
+                console.print(f"[dim]✗ позиции нет:[/dim] {ticker}")
+
+
+@app.command()
+@_guard
+def is_market_open(
+    ticker: str = typer.Argument(..., help="Тикер или FIGI инструмента"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Проверить, открыт ли рынок для инструмента."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        instrument = br.find_instrument_smart(ticker)
+        figi = getattr(instrument, "figi", "")
+        if not figi:
+            _fail(f"не удалось получить FIGI для {ticker}", code=4)
+        
+        open_status = br.is_market_open(figi)
+        
+        if json_output:
+            console.print_json(data={"ticker": ticker, "figi": figi, "market_open": open_status})
+        else:
+            if open_status:
+                console.print(f"[green]✓ рынок открыт:[/green] {ticker}")
+            else:
+                console.print(f"[red]✗ рынок закрыт:[/red] {ticker}")
 
 
 def main() -> None:

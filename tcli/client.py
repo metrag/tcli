@@ -248,6 +248,57 @@ class Broker:
             lambda: self._client.orders.cancel_order(account_id=account_id, order_id=order_id)
         )
 
+    def stop_orders(self, account_id: str) -> list[Any]:
+        """Получить список стоп-заявок."""
+        resp = with_retries(
+            lambda: self._client.stop_orders.get_stop_orders(account_id=account_id)
+        )
+        return list(resp.stop_orders)
+
+    def place_stop_order(
+        self,
+        account_id: str,
+        figi: str,
+        direction: OrderDirection,
+        quantity: int,
+        stop_price: Quotation,
+        price: Optional[Quotation] = None,
+        expiration_type: Any = None,
+    ) -> Any:
+        """Разместить стоп-заявку."""
+        from tinkoff.invest.schemas import StopOrderDirection, StopOrderExpirationType, StopOrderType
+
+        # Для простоты используем стандартный стоп
+        if direction == OrderDirection.ORDER_DIRECTION_BUY:
+            direction_value = StopOrderDirection.STOP_ORDER_DIRECTION_BUY
+        else:
+            direction_value = StopOrderDirection.STOP_ORDER_DIRECTION_SELL
+        expiration = (
+            expiration_type
+            or StopOrderExpirationType.STOP_ORDER_EXPIRATION_TYPE_GOOD_TILL_CANCEL
+        )
+        
+        return with_retries(
+            lambda: self._client.stop_orders.post_stop_order(
+                account_id=account_id,
+                figi=figi,
+                quantity=quantity,
+                price=price,
+                stop_price=stop_price,
+                direction=direction_value,
+                expiration_type=expiration,
+                stop_order_type=StopOrderType.STOP_ORDER_TYPE_STOP_LOSS,
+            )
+        )
+
+    def cancel_stop_order(self, account_id: str, stop_order_id: str) -> Any:
+        """Отменить стоп-заявку."""
+        return with_retries(
+            lambda: self._client.stop_orders.cancel_stop_order(
+                account_id=account_id, stop_order_id=stop_order_id
+            )
+        )
+
     # -- Операции ---------------------------------------------------------
 
     def operations(
@@ -291,6 +342,152 @@ class Broker:
     def find_instrument(self, query: str) -> list[Any]:
         resp = with_retries(lambda: self._client.instruments.find_instrument(query=query))
         return list(resp.instruments)
+
+    def trading_schedules(
+        self,
+        exchange: str = "MOEX",
+        from_: Optional[Any] = None,
+        to: Optional[Any] = None,
+    ) -> list[Any]:
+        """Получить расписание торгов биржи."""
+        resp = with_retries(
+            lambda: self._client.instruments.trading_schedules(
+                exchange=exchange, from_=from_, to=to
+            )
+        )
+        return list(resp.exchanges)
+
+    def get_estimated_margin(
+        self,
+        account_id: str,
+        figi: str,
+        direction: OrderDirection,
+        quantity: int,
+        price: Optional[Quotation] = None,
+    ) -> Any:
+        """Оценить требуемые средства для размещения заявки."""
+        resp = with_retries(
+            lambda: self._client.orders.get_order_margin(
+                account_id=account_id,
+                figi=figi,
+                direction=direction,
+                quantity=quantity,
+                price=price,
+            )
+        )
+        return resp
+
+    def get_position(self, account_id: str, figi: str) -> Optional[Any]:
+        """Получить позицию по инструменту."""
+        portfolio = self.portfolio(account_id)
+        for position in portfolio.positions:
+            if position.figi == figi:
+                return position
+        return None
+
+    def close_position(
+        self,
+        account_id: str,
+        figi: str,
+        price: Optional[Quotation] = None,
+        order_type: OrderType = OrderType.ORDER_TYPE_MARKET,
+    ) -> Optional[Any]:
+        """Закрыть позицию по инструменту."""
+        position = self.get_position(account_id, figi)
+        if position is None:
+            return None
+        
+        quantity = money_to_float(position.quantity)
+        if quantity == 0:
+            return None
+        
+        # Определяем направление: если позиция длинная - продаём, если короткая - покупаем
+        if quantity > 0:
+            direction = OrderDirection.ORDER_DIRECTION_SELL
+        else:
+            direction = OrderDirection.ORDER_DIRECTION_BUY
+        
+        return self.place_order(
+            account_id=account_id,
+            figi=figi,
+            direction=direction,
+            quantity=abs(int(quantity)),
+            price=price,
+            order_type=order_type,
+        )
+
+    def cancel_all_orders(self, account_id: str) -> list[Any]:
+        """Отменить все активные заявки."""
+        active_orders = self.orders(account_id)
+        cancelled = []
+        for order in active_orders:
+            try:
+                result = self.cancel_order(account_id, order.order_id)
+                cancelled.append(result)
+            except Exception:
+                continue
+        return cancelled
+
+    def cancel_all_stop_orders(self, account_id: str) -> list[Any]:
+        """Отменить все стоп-заявки."""
+        active_stops = self.stop_orders(account_id)
+        cancelled = []
+        for stop in active_stops:
+            try:
+                result = self.cancel_stop_order(account_id, stop.stop_order_id)
+                cancelled.append(result)
+            except Exception:
+                continue
+        return cancelled
+
+    def get_order_info(self, account_id: str, order_id: str) -> Any:
+        """Получить информацию о заявке."""
+        orders = self.orders(account_id)
+        for order in orders:
+            if order.order_id == order_id:
+                return order
+        return None
+
+    # -- Risk helpers -----------------------------------------------------
+
+    def get_free_cash(self, account_id: str) -> float:
+        """Получить свободные средства на счёте."""
+        portfolio = self.portfolio(account_id)
+        return money_to_float(portfolio.total_amount_currencies)
+
+    def is_market_open(self, figi: str) -> bool:
+        """Проверить, открыт ли рынок для инструмента."""
+        try:
+            status = self.trading_status(figi)
+            # Проверка статуса торгов
+            trading_status = getattr(status, "limit_order_available_flag", False)
+            return trading_status
+        except Exception:
+            return False
+
+    def estimate_commission(self, amount: float, tariff: float = 0.003) -> float:
+        """Оценить комиссию (по умолчанию 0.3% для скальпинга)."""
+        return amount * tariff
+
+    def calculate_position_size(
+        self,
+        risk_amount: float,
+        entry_price: float,
+        stop_loss_price: float,
+        lot_size: float,
+        min_step: float = 0.01,
+    ) -> int:
+        """Рассчитать размер позиции для заданного риска.
+        
+        lots = floor(risk_amount / ((entry - stop_loss) * lot_size))
+        """
+        if stop_loss_price >= entry_price:
+            return 0
+        price_diff = entry_price - stop_loss_price
+        if price_diff <= 0:
+            return 0
+        lots = risk_amount / (price_diff * lot_size)
+        return max(0, int(lots))
 
     # -- Получение всех инструментов по типу ------------------------------
 
@@ -490,6 +687,20 @@ class Broker:
             lambda: self._client.market_data.get_last_prices(figi=figi)
         )
         return list(resp.last_prices)
+
+    def orderbook(self, figi: str, depth: int = 10) -> Any:
+        """Получить стакан заявок."""
+        resp = with_retries(
+            lambda: self._client.market_data.get_order_book(figi=figi, depth=depth)
+        )
+        return resp
+
+    def trading_status(self, figi: str) -> Any:
+        """Получить статус торгов инструмента."""
+        resp = with_retries(
+            lambda: self._client.market_data.get_trading_status(figi=figi)
+        )
+        return resp
 
     def candles(
         self, figi: str, interval: CandleInterval, from_: Any, to: Any

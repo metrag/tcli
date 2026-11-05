@@ -42,6 +42,30 @@ def money_to_float(value: Any) -> float:
     return float(units) + float(nano) / 1e9
 
 
+def json_envelope(data: Any, contour: str, account: str, ok: bool = True, error: Any = None) -> dict:
+    """Создать JSON-envelope для --json вывода.
+    
+    Формат: {"ok": bool, "contour": str, "account": str, "ts": str, "tz": str, "data": ..., "error": ...}
+    """
+    envelope = {
+        "ok": ok,
+        "contour": contour,
+        "account": account,
+        "ts": datetime.now().isoformat(),
+        "tz": "Europe/Moscow",
+        "data": data if ok else None,
+    }
+    if error:
+        envelope["error"] = {"code": getattr(error, "value", "UNKNOWN_ERROR"), "message": str(error)}
+    return envelope
+
+
+def print_json(data: Any, contour: str, account: str, ok: bool = True, error: Any = None) -> None:
+    """Вывести JSON в формате envelope."""
+    envelope = json_envelope(data, contour, account, ok, error)
+    console.print_json(data=envelope)
+
+
 def to_jsonable(value: Any) -> Any:
     """Рекурсивная конвертация protobuf объектов в JSON-совместимые типы."""
     if value is None:
@@ -380,3 +404,97 @@ def print_instrument_info(info: dict) -> None:
         console.print("  [bold]Текущая цена:[/bold] [dim]недоступно[/dim]")
     
     console.print()
+
+
+def print_orderbook(
+    figi: str,
+    bids: list[dict],
+    asks: list[dict],
+    limit_up: float,
+    limit_down: float,
+) -> None:
+    """Вывод стакана заявок."""
+    console.print(f"\n[bold]Стакан[/bold] {figi}")
+    console.print("=" * 80)
+    
+    # Асks (продажи) - в обратном порядке, чтобы лучшая цена была внизу
+    if asks:
+        console.print("[red]Продажа (ASK):[/red]")
+        table_asks = Table(show_header=True, header_style="bold red")
+        table_asks.add_column("Цена", justify="right")
+        table_asks.add_column("Объём", justify="right")
+        for ask in reversed(asks[:10]):  # Топ-10 лучших цен
+            table_asks.add_row(
+                fmt_money(ask.get("price")),
+                str(ask.get("quantity", "")),
+            )
+        console.print(table_asks)
+    
+    console.print()
+    
+    # Bids (покупки)
+    if bids:
+        console.print("[green]Покупка (BID):[/green]")
+        table_bids = Table(show_header=True, header_style="bold green")
+        table_bids.add_column("Цена", justify="right")
+        table_bids.add_column("Объём", justify="right")
+        for bid in bids[:10]:  # Топ-10 лучших цен
+            table_bids.add_row(
+                fmt_money(bid.get("price")),
+                str(bid.get("quantity", "")),
+            )
+        console.print(table_bids)
+    
+    # Лимиты
+    if limit_up or limit_down:
+        console.print(f"\n[dim]Лимиты:↑ {fmt_money(limit_up)} ↓ {fmt_money(limit_down)}[/dim]")
+    
+    console.print()
+
+
+def print_trading_status(figi: str, status: dict) -> None:
+    """Вывод статуса торгов инструментом."""
+    console.print(f"\n[bold]Статус торгов[/bold] {figi}")
+    console.print("=" * 60)
+    
+    rows = [
+        ("Статус", status.get("status", "N/A")),
+        ("Купить", "✓" if status.get("buy_available") else "✗"),
+        ("Продать", "✓" if status.get("sell_available") else "✗"),
+        ("API торгов", "✓" if status.get("api_trade") else "✗"),
+    ]
+    
+    for label, value in rows:
+        console.print(f"  [bold]{label}:[/bold] {value}")
+    
+    console.print()
+
+
+def print_stop_orders(stop_orders: list[dict]) -> None:
+    """Вывод списка стоп-заявок."""
+    if not stop_orders:
+        console.print("[dim]Стоп-заявок нет[/dim]")
+        return
+    
+    table = Table(title="Стоп-заявки")
+    table.add_column("ID", style="dim")
+    table.add_column("FIGI", style="cyan")
+    table.add_column("Направление")
+    table.add_column("Объём", justify="right")
+    table.add_column("Цена", justify="right")
+    table.add_column("Статус")
+    
+    for so in stop_orders:
+        direction = so.get("direction", "N/A")
+        direction_style = "green" if "BUY" in direction else "red"
+        
+        table.add_row(
+            str(so.get("id", "")),
+            str(so.get("figi", "")),
+            f"[{direction_style}]{direction}[/{direction_style}]",
+            str(so.get("quantity", "")),
+            fmt_money(so.get("price")),
+            str(so.get("status", "")),
+        )
+    
+    console.print(table)
