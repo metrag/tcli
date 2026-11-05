@@ -101,7 +101,10 @@ def with_retries(
 
 def api_error_text(exc: BaseException) -> str:
     if isinstance(exc, UnauthenticatedError):
-        return "авторизация: токен недействителен или отозван (40003) — обновите .env"
+        return (
+            "авторизация: токен недействителен или отозван (40003) — "
+            "проверьте токен и контур (SANDBOX/LIVE)"
+        )
     if isinstance(exc, RequestError):
         details = getattr(exc, "details", "") or ""
         code = _code_name(exc)
@@ -535,20 +538,22 @@ class Broker:
 
     @staticmethod
     def position_row(position: Any) -> dict:
+        from .render import to_jsonable
         quantity = money_to_float(position.quantity)
         current = money_to_float(position.current_price)
         return {
             "ticker": getattr(position, "ticker", "") or position.figi,
             "type": _enum_name(position.instrument_type),
-            "quantity": position.quantity,
-            "avg": position.average_position_price,
-            "current": position.current_price,
+            "quantity": to_jsonable(position.quantity),
+            "avg": to_jsonable(position.average_position_price),
+            "current": to_jsonable(position.current_price),
             "value": quantity * current,
             "pnl": money_to_float(position.expected_yield),
         }
 
     @staticmethod
     def order_row(order: Any, ticker: str) -> dict:
+        from .render import to_jsonable
         price = getattr(order, "initial_order_price", None) or getattr(
             order, "executed_order_price", None
         )
@@ -557,19 +562,20 @@ class Broker:
             "direction": _enum_name(order.direction),
             "status": _enum_name(order.execution_report_status),
             "lots": order.lots_executed,
-            "price": price,
+            "price": to_jsonable(price),
             "order_id": order.order_id,
         }
 
     @staticmethod
     def operation_row(operation: Any, ticker: str) -> dict:
+        from .render import to_jsonable
         op_type = getattr(operation, "operation_type", None) or getattr(operation, "type", None)
         return {
-            "date": getattr(operation, "date", None),
+            "date": to_jsonable(getattr(operation, "date", None)),
             "type": _enum_name(op_type),
             "ticker": ticker,
-            "quantity": getattr(operation, "quantity", None),
-            "price": getattr(operation, "price", None),
-            "amount": getattr(operation, "payment", None),
+            "quantity": to_jsonable(getattr(operation, "quantity", None)),
+            "price": to_jsonable(getattr(operation, "price", None)),
+            "amount": to_jsonable(getattr(operation, "payment", None)),
             "currency": getattr(operation, "currency", ""),
         }

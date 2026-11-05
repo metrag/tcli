@@ -42,6 +42,29 @@ def money_to_float(value: Any) -> float:
     return float(units) + float(nano) / 1e9
 
 
+def to_jsonable(value: Any) -> Any:
+    """Рекурсивная конвертация protobuf объектов в JSON-совместимые типы."""
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {k: to_jsonable(v) for k, v in value.items()}
+    # Проверка на MoneyValue/Quotation (есть units и nano)
+    if hasattr(value, "units") and hasattr(value, "nano"):
+        return money_to_float(value)
+    # Проверка на datetime
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    # Проверка на enum
+    if hasattr(value, "value") and hasattr(value, "name"):
+        return value.name if hasattr(value, "name") else str(value)
+    # Общий случай: конвертируем в строку
+    return str(value)
+
+
 def fmt_money(value: Any, currency: str = "₽") -> str:
     num = money_to_float(value)
     sign = "-" if num < 0 else ""

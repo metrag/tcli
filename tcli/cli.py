@@ -536,8 +536,15 @@ def order_sell(
 @_guard
 def order_cancel(
     order_id: str = typer.Argument(..., help="ID заявки"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим"),
 ) -> None:
     """Отменить заявку."""
+    if not yes and not no_prompt:
+        confirm = typer.confirm(f"Отменить заявку {order_id}?")
+        if not confirm:
+            console.print("[red]Отменено пользователем[/red]")
+            raise typer.Exit(1)
     settings = _settings()
     header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
     with _open_broker(settings) as br:

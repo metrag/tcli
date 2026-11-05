@@ -7,9 +7,11 @@ name = "tcli"
 version = "0.1.0"
 description = "CLI для Tinkoff Invest API (только песочница)"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<4.0"
 # tinkoff-investments ставится отдельно с --no-deps (см. README, шаг 2):
-# прямая ссылка на git в dependencies заставила бы pip резолвить его зависимости повторно.
+# pip install --no-deps "tinkoff-investments @ git+https://github.com/RussianInvestments/invest-python.git@0.2.0-beta117"
+# Это необходимо из-за ограничений protobuf и удаления пакета с PyPI.
+# Для Python 3.14+ может потребоваться protobuf>=5.0.0
 dependencies = [
     "typer>=0.12",
     "rich>=13",
