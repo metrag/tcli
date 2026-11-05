@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -43,16 +44,20 @@ class Settings:
         path = env_path or ENV_PATH
         values = dotenv_values(path) if path.exists() else {}
 
-        sandbox_token = (values.get("INVEST_SANDBOX_TOKEN") or "").strip()
-        main_token = (values.get("INVEST_TOKEN") or "").strip()
+        # Fallback на переменные окружения: env > файл
+        def _get(key: str) -> str:
+            return (os.environ.get(key) or values.get(key) or "").strip()
 
-        contour_str = (values.get("TCLI_CONTOUR") or "SANDBOX").strip().upper()
+        sandbox_token = _get("INVEST_SANDBOX_TOKEN")
+        main_token = _get("INVEST_TOKEN")
+
+        contour_str = _get("TCLI_CONTOUR") or "SANDBOX"
         contour = Contour(contour_str) if contour_str in ("SANDBOX", "LIVE") else Contour.SANDBOX
 
         return cls(
             sandbox_token=sandbox_token,
             main_token=main_token,
-            sandbox_account_name=(values.get("SANDBOX_ACCOUNT_NAME") or "").strip(),
+            sandbox_account_name=_get("SANDBOX_ACCOUNT_NAME"),
             contour=contour,
             env_path=path,
         )
