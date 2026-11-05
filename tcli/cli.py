@@ -646,17 +646,30 @@ def candles(
         "1day",
         "--interval",
         "-i",
-        help="Интервал: 1min, 5min, 15min, 1hour, 1day",
+        help="Интервал: 1min, 5min, 15min, 1hour, 4h, 1day",
     ),
     days: int = typer.Option(30, "--days", "-d", help="Количество дней истории"),
+    session: str = typer.Option(
+        "all",
+        "--session",
+        "-s",
+        help="Сессия: day (10:00-18:40), evening (19:05-23:50), all",
+    ),
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Начальная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
+    to_date: Optional[str] = typer.Option(
+        None, "--to", help="Конечная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
 ) -> None:
-    """История свечей инструмента."""
+    """История свечей инструмента с расширенной фильтрацией (#2-4 из TODO.md)."""
     settings = _settings()
     header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
     
     from tinkoff.invest.schemas import CandleInterval
     
+    # Базовые интервалы API
     interval_map = {
         "1min": CandleInterval.CANDLE_INTERVAL_1_MIN,
         "5min": CandleInterval.CANDLE_INTERVAL_5_MIN,
@@ -665,20 +678,56 @@ def candles(
         "1day": CandleInterval.CANDLE_INTERVAL_DAY,
     }
     
-    if interval not in interval_map:
-        _fail(f"неизвестный интервал: {interval} (допустимо: {', '.join(interval_map.keys())})", code=2)
+    # 4h интервал требует склеивания 4×1h свечей
+    is_4h = interval == "4h"
+    api_interval = "1hour" if is_4h else interval
+    
+    if api_interval not in interval_map:
+        available = ", ".join(list(interval_map.keys()) + ["4h"])
+        _fail(f"неизвестный интервал: {interval} (допустимо: {available})", code=2)
+    if session not in ("day", "evening", "all"):
+        _fail(f"неизвестная сессия: {session} (допустимо: day, evening, all)", code=2)
+    
+    # Парсинг дат
+    now = datetime.now(timezone.utc)
+    if to_date:
+        try:
+            if "T" in to_date:
+                to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+            else:
+                to_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(f"неверный формат --to: {to_date} (используйте YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)", code=2)
+    else:
+        to_dt = now
+    
+    if from_date:
+        try:
+            if "T" in from_date:
+                from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            else:
+                from_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(
+                f"неверный формат --from: {from_date} "
+                "(используйте YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)",
+                code=2,
+            )
+            _fail(
+                f"неверный формат --from: {from_date} "
+                "(используйте YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)",
+                code=2,
+            )
     
     with _open_broker(settings) as br:
         figi = br.figi(ticker)
         
-        now = datetime.now(timezone.utc)
-        from_dt = now - timedelta(days=days)
-        
+        # Получаем свечи с API
         candle_list = br.candles(
             figi=figi,
-            interval=interval_map[interval],
+            interval=interval_map[api_interval],
             from_=from_dt,
-            to=now,
+            to=to_dt,
         )
         
         if not candle_list:
@@ -686,6 +735,21 @@ def candles(
                 console.print_json(data=[])
             else:
                 console.print("свечей нет")
+            raise typer.Exit(0)
+        
+        # Фильтрация по сессиям (если нужно)
+        if session != "all":
+            candle_list = _filter_by_session(candle_list, session)
+        
+        # Склеивание 4h свечей (если нужно)
+        if is_4h:
+            candle_list = _merge_to_4h(candle_list)
+        
+        if not candle_list:
+            if json_output:
+                console.print_json(data=[])
+            else:
+                console.print(f"свечей для сессии '{session}' не найдено")
             raise typer.Exit(0)
         
         rows = []
@@ -703,12 +767,101 @@ def candles(
             result = {
                 "ticker": ticker,
                 "interval": interval,
-                "days": days,
+                "session": session,
+                "from": from_dt.isoformat(),
+                "to": to_dt.isoformat(),
                 "candles": rows
             }
             console.print_json(data=result)
         else:
             print_candles(rows, ticker=ticker, interval=interval)
+
+
+def _filter_by_session(candles: list, session: str) -> list:
+    """Фильтрация свечей по торговой сессии (#3 из TODO.md)."""
+    filtered = []
+    for c in candles:
+        hour = c.time.hour
+        minute = c.time.minute
+        time_minutes = hour * 60 + minute
+        
+        if session == "day":
+            # Дневная сессия: 10:00 - 18:40
+            if 600 <= time_minutes <= 1120:  # 10:00-18:40
+                filtered.append(c)
+        elif session == "evening":
+            # Вечерняя сессия: 19:05 - 23:50
+            if 1145 <= time_minutes <= 1430:  # 19:05-23:50
+                filtered.append(c)
+    
+    return filtered
+
+
+def _merge_to_4h(candles: list) -> list:
+    """Склеивание 1h свечей в 4h (#2 из TODO.md)."""
+    if not candles:
+        return []
+    
+    merged = []
+    current_group = []
+    
+    for c in candles:
+        # Группируем по 4 часа
+        hour_block = (c.time.hour // 4) * 4
+        
+        if not current_group:
+            current_group.append(c)
+        else:
+            last_hour_block = (current_group[-1].time.hour // 4) * 4
+            same_day = current_group[-1].time.date() == c.time.date()
+            
+            if same_day and hour_block == last_hour_block:
+                current_group.append(c)
+            else:
+                # Создаём merged свечу
+                merged.append(_merge_candle_group(current_group))
+                current_group = [c]
+    
+    # Не забываем последнюю группу
+    if current_group:
+        merged.append(_merge_candle_group(current_group))
+    
+    return merged
+
+
+def _merge_candle_group(group: list) -> Any:
+    """Создание одной 4h свечи из группы 1h свечей."""
+    from tinkoff.invest.schemas import Candle
+    
+    if not group:
+        return None
+    
+    # Open - из первой свечи
+    open_price = group[0].open
+    
+    # High - максимум из всех high
+    high_price = max(g.high for g in group)
+    
+    # Low - минимум из всех low
+    low_price = min(g.low for g in group)
+    
+    # Close - из последней свечи
+    close_price = group[-1].close
+    
+    # Volume - сумма всех volume
+    total_volume = sum(g.volume for g in group)
+    
+    # Time - время начала первой свечи
+    start_time = group[0].time
+    
+    return Candle(
+        time=start_time,
+        open=open_price,
+        high=high_price,
+        low=low_price,
+        close=close_price,
+        volume=total_volume,
+    )
 
 
 @app.command()
@@ -1451,7 +1604,11 @@ def estimate(
     ticker: str = typer.Argument(..., help="Тикер инструмента"),
     quantity: int = typer.Argument(..., help="Количество лотов"),
     direction: str = typer.Argument("buy", help="Направление: buy или sell"),
-    price: Optional[float] = typer.Option(None, "--price", help="Цена (если не указана, используется рыночная)"),
+    price: Optional[float] = typer.Option(
+        None,
+        "--price",
+        help="Цена (если не указана, используется рыночная)",
+    ),
     estimate_margin: bool = typer.Option(False, "--margin", help="Оценить требуемую маржу"),
     estimate_commission: bool = typer.Option(False, "--commission", help="Оценить комиссию"),
     json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
@@ -1467,7 +1624,11 @@ def estimate(
     if dir_lower not in ("buy", "sell"):
         _fail("направление должно быть 'buy' или 'sell'", code=2)
     
-    order_direction = OrderDirection.ORDER_DIRECTION_BUY if dir_lower == "buy" else OrderDirection.ORDER_DIRECTION_SELL
+    order_direction = (
+        OrderDirection.ORDER_DIRECTION_BUY
+        if dir_lower == "buy"
+        else OrderDirection.ORDER_DIRECTION_SELL
+    )
     
     with _open_broker(settings) as br:
         account = br.pick_account()
@@ -1518,8 +1679,16 @@ def estimate(
                 )
                 # margin_resp содержит поля: commission, total_asset_amount, etc.
                 result["margin"] = {
-                    "commission": str(money_to_float(margin_resp.commission)) if hasattr(margin_resp, "commission") else "0",
-                    "total_asset_amount": str(money_to_float(margin_resp.total_asset_amount)) if hasattr(margin_resp, "total_asset_amount") else "0",
+                    "commission": (
+                        str(money_to_float(margin_resp.commission))
+                        if hasattr(margin_resp, "commission")
+                        else "0"
+                    ),
+                    "total_asset_amount": (
+                        str(money_to_float(margin_resp.total_asset_amount))
+                        if hasattr(margin_resp, "total_asset_amount")
+                        else "0"
+                    ),
                 }
             except Exception as exc:
                 result["margin"] = {"error": str(exc)}
@@ -1541,7 +1710,7 @@ def estimate(
         if json_output:
             console.print_json(data=result)
         else:
-            console.print(f"\n[bold]Оценка заявки:[/bold]")
+            console.print("\n[bold]Оценка заявки:[/bold]")
             console.print(f"  Инструмент: {result['ticker']} (FIGI: {result['figi']})")
             console.print(f"  Направление: {result['direction'].upper()}")
             console.print(f"  Лоты: {result['quantity']} × {result['lot']} = {result['total_lots']} шт.")
@@ -1560,7 +1729,9 @@ def estimate(
                     console.print(f"  [red]Комиссия: ошибка — {result['commission']['error']}[/red]")
                 else:
                     console.print(f"  Стоимость: {result['commission']['total_value']} ₽")
-                    console.print(f"  Комиссия ({result['commission']['tariff']}%): {result['commission']['amount']} ₽")
+                    tariff = result["commission"]["tariff"]
+                    amount = result["commission"]["amount"]
+                    console.print(f"  Комиссия ({tariff}%): {amount} ₽")
 
 
 # -- Position Management: close, cancel_all, stop_orders -------------------
