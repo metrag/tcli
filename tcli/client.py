@@ -265,6 +265,28 @@ f"варианты: {available}"
             lambda: self._client.orders.cancel_order(account_id=account_id, order_id=order_id)
         )
 
+    def modify_order(
+        self,
+        account_id: str,
+        order_id: str,
+        quantity: int,
+        price: Optional[Quotation] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> Any:
+        """Изменить существующую заявку (#25)."""
+        from tinkoff.invest.schemas import ReplaceOrderRequest
+
+        request = ReplaceOrderRequest(
+            account_id=account_id,
+            order_id=order_id,
+            quantity=quantity,
+            price=price,
+        )
+        if idempotency_key:
+            request.idempotency_key = idempotency_key
+        
+        return with_retries(lambda: self._client.orders.replace_order(request=request))
+
     def stop_orders(self, account_id: str) -> list[Any]:
         """Получить список стоп-заявок."""
         resp = with_retries(

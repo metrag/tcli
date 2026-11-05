@@ -696,6 +696,94 @@ def order_cancel(
         log_event("order_cancelled", order_id=order_id)
 
 
+@app.command(name="order-modify")
+@_guard
+def order_modify(
+    order_id: str = typer.Argument(..., help="ID заявки для изменения"),
+    quantity: Optional[int] = typer.Option(None, "--quantity", "-q", help="Новое количество лотов"),
+    price: Optional[float] = typer.Option(None, "--price", "-p", help="Новая цена"),
+    idempotency_key: Optional[str] = typer.Option(None, "--idempotency-key", help="Ключ идемпотентности"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате"),
+) -> None:
+    """Изменить существующую заявку (#25).
+    
+    Можно изменить количество лотов и/или цену заявки.
+    """
+    if quantity is None and price is None:
+        _fail("Укажите хотя бы один параметр: --quantity или --price", code=2)
+    
+    if quantity is not None and quantity <= 0:
+        _fail("Количество должно быть больше 0", code=2)
+    
+    if price is not None and price <= 0:
+        _fail("Цена должна быть больше 0", code=2)
+    
+    if not yes and not no_prompt:
+        changes = []
+        if quantity is not None:
+            changes.append(f"количество: {quantity}")
+        if price is not None:
+            changes.append(f"цена: {price}")
+        console.print(f"Изменить заявку {order_id}: {', '.join(changes)}")
+        confirm = typer.confirm("Подтвердить изменение?")
+        if not confirm:
+            console.print("[red]Отменено пользователем[/red]")
+            raise typer.Exit(1)
+    
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        # Convert price to Quotation if provided
+        price_quotation = None
+        if price is not None:
+            units = int(price)
+            nano = int(round((price - units) * 1e9))
+            from tinkoff.invest.schemas import Quotation
+            price_quotation = Quotation(units=units, nano=nano)
+        
+        resp = br.modify_order(
+            account_id=account.id,
+            order_id=order_id,
+            quantity=quantity,
+            price=price_quotation,
+            idempotency_key=idempotency_key,
+        )
+        
+        if json_output:
+            result = {
+                "status": "success",
+                "order_id": resp.order_id,
+                "new_quantity": quantity,
+                "new_price": price,
+            }
+            console.print_json(
+                data=result,
+                contour=settings.contour.value,
+                account=account.name or account.id,
+            )
+        else:
+            console.print(f"[green]✓ Заявка {order_id} изменена[/green]")
+            console.print(f"  Новый order_id: {resp.order_id}")
+            if quantity is not None:
+                console.print(f"  Новое количество: {quantity}")
+            if price is not None:
+                console.print(f"  Новая цена: {price}")
+        
+        log_event(
+            "order_modified",
+            order_id=order_id,
+            new_order_id=resp.order_id,
+            new_quantity=quantity,
+            new_price=price,
+        )
+
+
+
 # -- Команды истории и рынка ----------------------------------------------
 
 
