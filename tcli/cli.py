@@ -107,8 +107,24 @@ def _open_broker(settings: Settings) -> Broker:
 
 
 def _fail(message: str, code: int = 1) -> None:
-    console.print(f"[red]Ошибка:[/red] {message}")
+    """Вывод ошибки. При --json — машиночитаемый JSON (#4 из TODO.md)."""
+    import json
+    import sys
+
+    if "--json" in sys.argv:
+        print(json.dumps({"error": message, "code": code}, ensure_ascii=False))
+    else:
+        console.print(f"[red]Ошибка:[/red] {message}")
     raise typer.Exit(code)
+
+
+def _validate_range(from_dt: Any, to_dt: Any) -> None:
+    """Проверить корректность диапазона дат (#3 из TODO.md)."""
+    if from_dt is not None and to_dt is not None and from_dt >= to_dt:
+        _fail(
+            f"неверный диапазон: --from ({from_dt.date()}) должен быть раньше --to ({to_dt.date()})",
+            code=2,
+        )
 
 
 def _guard(fn: Any) -> Any:
@@ -233,7 +249,9 @@ def trades(
     else:
         # По умолчанию - последние 24 часа
         from_dt = to_dt - timedelta(days=1)
-    
+
+    _validate_range(from_dt, to_dt)
+
     with _open_broker(settings) as br:
         figi = br.figi(ticker)
         
@@ -337,7 +355,9 @@ def fees(
     else:
         # По умолчанию - последние 30 дней
         from_dt = to_dt - timedelta(days=30)
-    
+
+    _validate_range(from_dt, to_dt)
+
     with _open_broker(settings) as br:
         account = br.pick_account()
         
@@ -425,7 +445,9 @@ def export(
     else:
         # По умолчанию - последние 30 дней
         from_dt = to_dt - timedelta(days=30)
-    
+
+    _validate_range(from_dt, to_dt)
+
     with _open_broker(settings) as br:
         account = br.pick_account()
         
@@ -826,7 +848,7 @@ def change_mode(
         _fail(f"неизвестный контур: {contour} (допустимо: sandbox, live)", code=2)
 
     if new_contour != current_contour:
-        set_env_value("TCLI_CONTOUR", new_contour.value)
+        set_env_value("TCLI_CONTOUR", new_contour.value, env_path=settings.env_path)
         console.print(f"контур: {current_contour.value} → [green]{new_contour.value}[/green]")
         new_token = settings.main_token if new_contour == Contour.LIVE else settings.sandbox_token
         console.print(f"токен: {settings.masked()} → {mask_token(new_token)}")
@@ -1569,12 +1591,9 @@ def candles(
                 "(используйте YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)",
                 code=2,
             )
-            _fail(
-                f"неверный формат --from: {from_date} "
-                "(используйте YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)",
-                code=2,
-            )
-    
+
+    _validate_range(from_dt, to_dt)
+
     with _open_broker(settings) as br:
         figi = br.figi(ticker)
         
@@ -2168,7 +2187,7 @@ def account_select() -> None:
         
         # Сохранить в .env с правильным ключом для контура
         account_key = settings.account_name_key
-        set_env_value(account_key, account_name)
+        set_env_value(account_key, account_name, env_path=settings.env_path)
         console.print(f"[green]выбран счёт:[/green] {account_name}")
         console.print(f"[dim]сохранено в .env как {account_key}[/dim]")
         log_event("account_selected", account_id=selected.id, account_name=account_name)

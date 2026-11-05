@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging as _logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -19,6 +20,15 @@ CERT_PATH = PROJECT_ROOT / "certs" / "russian-trusted-root.pem"
 class Contour(str, Enum):
     SANDBOX = "SANDBOX"
     LIVE = "LIVE"
+
+
+# Подавляем шумный лог SDK (request_id в выводе ошибок) — #5.
+# При TCLI_DEBUG=1 сообщения SDK сохраняются в stderr.
+_sdk_log = _logging.getLogger("tinkoff")
+if os.environ.get("TCLI_DEBUG"):
+    _sdk_log.setLevel(_logging.ERROR)
+else:
+    _sdk_log.setLevel(_logging.CRITICAL)
 
 
 def mask_token(token: str) -> str:
@@ -156,10 +166,9 @@ def set_env_value(key: str, value: str, env_path: Optional[Path] = None) -> None
             
             # Атомарная замена
             os.replace(tmp_path, path)
-            
-            # Сохраняем права доступа оригинала
-            if path.exists():
-                tmp_path.chmod(0o600)  # Чтение/запись только для владельца
+
+            # Права доступа только для владельца (.env содержит секреты)
+            path.chmod(0o600)
             
         finally:
             # Блокировка освобождается автоматически при закрытии файла
