@@ -1442,6 +1442,127 @@ def sessions(
             console.print(table)
 
 
+# -- Risk/Estimation: estimate ----------------------------------------------
+
+
+@app.command()
+@_guard
+def estimate(
+    ticker: str = typer.Argument(..., help="Тикер инструмента"),
+    quantity: int = typer.Argument(..., help="Количество лотов"),
+    direction: str = typer.Argument("buy", help="Направление: buy или sell"),
+    price: Optional[float] = typer.Option(None, "--price", help="Цена (если не указана, используется рыночная)"),
+    estimate_margin: bool = typer.Option(False, "--margin", help="Оценить требуемую маржу"),
+    estimate_commission: bool = typer.Option(False, "--commission", help="Оценить комиссию"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Оценка стоимости заявки (#21 из TODO.md)."""
+    from tinkoff.invest.schemas import OrderDirection, Quotation
+    
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    # Определяем направление
+    dir_lower = direction.lower()
+    if dir_lower not in ("buy", "sell"):
+        _fail("направление должно быть 'buy' или 'sell'", code=2)
+    
+    order_direction = OrderDirection.ORDER_DIRECTION_BUY if dir_lower == "buy" else OrderDirection.ORDER_DIRECTION_SELL
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        # Получаем инструмент
+        instrument = br.find_instrument_smart(ticker)
+        figi = getattr(instrument, "figi", "")
+        lot = getattr(instrument, "lot", 1)
+        ticker_name = getattr(instrument, "ticker", ticker)
+        
+        result = {
+            "ticker": ticker_name,
+            "figi": figi,
+            "direction": dir_lower,
+            "quantity": quantity,
+            "lot": lot,
+            "total_lots": quantity * lot,
+        }
+        
+        # Если указана цена, используем её
+        price_quotation = None
+        if price is not None:
+            units = int(price)
+            nano = int(round((price - units) * 1e9))
+            price_quotation = Quotation(units=units, nano=nano)
+            result["price"] = str(price)
+        else:
+            # Получаем рыночную цену
+            try:
+                prices = br.last_prices([figi])
+                if prices:
+                    last_price = prices[0].price
+                    result["price"] = str(money_to_float(last_price))
+                else:
+                    result["price"] = None
+            except Exception:
+                result["price"] = None
+        
+        # Оценка маржи
+        if estimate_margin:
+            try:
+                margin_resp = br.get_estimated_margin(
+                    account_id=account.id,
+                    figi=figi,
+                    direction=order_direction,
+                    quantity=quantity,
+                    price=price_quotation,
+                )
+                # margin_resp содержит поля: commission, total_asset_amount, etc.
+                result["margin"] = {
+                    "commission": str(money_to_float(margin_resp.commission)) if hasattr(margin_resp, "commission") else "0",
+                    "total_asset_amount": str(money_to_float(margin_resp.total_asset_amount)) if hasattr(margin_resp, "total_asset_amount") else "0",
+                }
+            except Exception as exc:
+                result["margin"] = {"error": str(exc)}
+        
+        # Оценка комиссии
+        if estimate_commission and result.get("price"):
+            try:
+                price_float = float(result["price"])
+                total_value = price_float * quantity * lot
+                commission = br.estimate_commission(total_value)
+                result["commission"] = {
+                    "amount": str(commission),
+                    "tariff": "0.003",  # 0.3% по умолчанию
+                    "total_value": str(total_value),
+                }
+            except Exception as exc:
+                result["commission"] = {"error": str(exc)}
+        
+        if json_output:
+            console.print_json(data=result)
+        else:
+            console.print(f"\n[bold]Оценка заявки:[/bold]")
+            console.print(f"  Инструмент: {result['ticker']} (FIGI: {result['figi']})")
+            console.print(f"  Направление: {result['direction'].upper()}")
+            console.print(f"  Лоты: {result['quantity']} × {result['lot']} = {result['total_lots']} шт.")
+            if result.get("price"):
+                console.print(f"  Цена: {result['price']} ₽")
+            
+            if "margin" in result:
+                if "error" in result["margin"]:
+                    console.print(f"  [red]Маржа: ошибка — {result['margin']['error']}[/red]")
+                else:
+                    console.print(f"  Требуемая маржа: {result['margin']['total_asset_amount']} ₽")
+                    console.print(f"  Комиссия (маржа): {result['margin']['commission']} ₽")
+            
+            if "commission" in result:
+                if "error" in result["commission"]:
+                    console.print(f"  [red]Комиссия: ошибка — {result['commission']['error']}[/red]")
+                else:
+                    console.print(f"  Стоимость: {result['commission']['total_value']} ₽")
+                    console.print(f"  Комиссия ({result['commission']['tariff']}%): {result['commission']['amount']} ₽")
+
+
 # -- Position Management: close, cancel_all, stop_orders -------------------
 
 
