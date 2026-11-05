@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
 from typing import Any, Optional
 
 import typer
@@ -55,8 +56,9 @@ app = typer.Typer(
     help="tcli — CLI для Tinkoff Invest API. Поддержка SANDBOX и LIVE контуров.",
 )
 
-# Глобальная переменная для хранения значения --account (#27)
+# Глобальные переменные для общих флагов
 _global_account: Optional[str] = None
+_env_override: Optional[Path] = None
 
 
 @app.callback()
@@ -66,13 +68,26 @@ def main_callback(
         "--account",
         help="Выбор счёта для этой команды (имя или ID)",
     ),
+    env: Optional[Path] = typer.Option(
+        None,
+        "--env",
+        help="Путь к .env файлу (или TCLI_ENV_PATH)",
+    ),
 ) -> None:
     """Глобальный callback для обработки общих флагов."""
-    global _global_account
+    import os
+    global _global_account, _env_override
     _global_account = account
+    # --env имеет приоритет над TCLI_ENV_PATH
+    if env:
+        _env_override = env
+    elif "TCLI_ENV_PATH" in os.environ:
+        _env_override = Path(os.environ["TCLI_ENV_PATH"])
+    else:
+        _env_override = None
 
 def _settings() -> Settings:
-    settings = Settings.load()
+    settings = Settings.load(env_path=_env_override)
     # Применяем глобальный флаг --account (#27)
     if _global_account:
         settings.account_override = _global_account
