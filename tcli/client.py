@@ -85,6 +85,13 @@ def with_retries(
     base_delay: float = RETRY_BASE_DELAY,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Any:
+    """Retry handler с поддержкой rate-limiting (#43 из TODO.md).
+    
+    Exponential backoff с jitter для избежания thundering herd.
+    Обрабатывает 429/RESOURCE_EXHAUSTED с учётом Retry-After.
+    """
+    import random
+    
     last: Optional[BaseException] = None
     for attempt in range(attempts):
         try:
@@ -93,9 +100,27 @@ def with_retries(
             last = exc
             if attempt == attempts - 1 or not is_transient(exc):
                 raise
-            delay = base_delay * (3**attempt)
-            _log.warning("транзиентная ошибка %s, повтор через %.1f с", _code_name(exc), delay)
+            
+            code = _code_name(exc)
+            
+            # Rate-limit handling (RESOURCE_EXHAUSTED = 429)
+            if code == "RESOURCE_EXHAUSTED":
+                # Check for Retry-After header if available
+                retry_after = getattr(exc, 'retry_after', None)
+                if retry_after:
+                    delay = float(retry_after)
+                    _log.warning("rate-limit (429), Retry-After=%.1f с", delay)
+                else:
+                    # Exponential backoff с jitter
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    _log.warning("rate-limit (429), повтор через %.1f с", delay)
+            else:
+                # Standard exponential backoff с jitter для других транзиентных ошибок
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                _log.warning("транзиентная ошибка %s, повтор через %.1f с", code, delay)
+            
             sleep(delay)
+    
     raise last if last else RuntimeError("with_retries: пустой вызов")
 
 
@@ -621,6 +646,89 @@ f"варианты: {available}"
                 continue
         return cancelled
 
+    def flatten_all_and_wait(self, account_id: str, timeout: int = 60) -> dict:
+        """Закрыть все позиции и ждать исполнения (#35 из TODO.md).
+        
+        Отправляет рыночные заявки на закрытие всех позиций и ждёт их исполнения.
+        """
+        import time
+
+        from tinkoff.invest.schemas import OrderDirection, OrderType
+        
+        result = {
+            'closed_positions': 0,
+            'pending_orders': [],
+            'errors': [],
+        }
+        
+        # Получаем все позиции
+        try:
+            portfolio = self.portfolio(account_id)
+            positions = [p for p in portfolio.positions if abs(money_to_float(p.quantity)) > 0]
+        except Exception as e:
+            result['errors'].append(f"Ошибка получения портфеля: {e}")
+            return result
+        
+        if not positions:
+            return result
+        
+        # Отправляем заявки на закрытие
+        order_ids = []
+        for position in positions:
+            quantity = abs(money_to_float(position.quantity))
+            if quantity <= 0:
+                continue
+            
+            # Определяем направление
+            direction = (
+                OrderDirection.ORDER_DIRECTION_SELL 
+                if money_to_float(position.quantity) > 0 
+                else OrderDirection.ORDER_DIRECTION_BUY
+            )
+            
+            try:
+                order = self.place_order(
+                    account_id=account_id,
+                    figi=position.figi,
+                    direction=direction,
+                    quantity=int(quantity),
+                    order_type=OrderType.ORDER_TYPE_MARKET,
+                )
+                order_ids.append(order.order_id)
+                result['pending_orders'].append({
+                    'order_id': order.order_id,
+                    'figi': position.figi,
+                    'quantity': int(quantity),
+                })
+            except Exception as e:
+                result['errors'].append(f"Ошибка закрытия {position.figi}: {e}")
+        
+        # Ждём исполнения всех заявок
+        start_time = time.time()
+        while order_ids and (time.time() - start_time) < timeout:
+            time.sleep(0.5)
+            remaining = []
+            for order_id in order_ids:
+                try:
+                    order_info = self.get_order_info(account_id, order_id)
+                    if order_info:
+                        status = getattr(order_info, 'execution_report_status', None)
+                        # Проверяем финальные статусы
+                        if status and status.name in ('EXECUTION_REPORT_STATUS_FILL', 
+                                                       'EXECUTION_REPORT_STATUS_REJECTED',
+                                                       'EXECUTION_REPORT_STATUS_CANCELLED'):
+                            result['closed_positions'] += 1
+                        else:
+                            remaining.append(order_id)
+                    else:
+                        # Ордер не найден - возможно исполнен
+                        result['closed_positions'] += 1
+                except Exception:
+                    remaining.append(order_id)
+            order_ids = remaining
+        
+        return result
+
     def emergency_halt(self, account_id: str) -> dict:
         """Аварийный выключатель (#34 из TODO.md).
         
@@ -954,6 +1062,43 @@ f"варианты: {available}"
             )
         )
         return list(resp.trades)
+
+    def stream_quotes(self, figis: list[str]) -> Any:
+        """Создать стрим последних цен для списка FIGI."""
+        from tinkoff.invest.schemas import LastPriceInstrument
+        
+        market_data_stream = self._client.create_market_data_stream()
+        instruments = [LastPriceInstrument(figi=figi) for figi in figis]
+        market_data_stream.last_price.subscribe(instruments)
+        return market_data_stream
+    
+    def stream_trades(self, figis: list[str]) -> Any:
+        """Создать стрим сделок для списка FIGI."""
+        from tinkoff.invest.schemas import TradeInstrument
+        
+        market_data_stream = self._client.create_market_data_stream()
+        instruments = [TradeInstrument(figi=figi) for figi in figis]
+        market_data_stream.trades.subscribe(instruments)
+        return market_data_stream
+    
+    def stream_orderbook(self, figi: str, depth: int = 10) -> Any:
+        """Создать стрим стакана для FIGI."""
+        from tinkoff.invest.schemas import OrderBookInstrument
+        
+        market_data_stream = self._client.create_market_data_stream()
+        instrument = OrderBookInstrument(figi=figi, depth=depth)
+        market_data_stream.order_book.subscribe([instrument])
+        return market_data_stream
+
+    def stream_orders(self, account_id: str) -> Any:
+        """Подписка на статусы заявок (#26 из TODO.md).
+        
+        Возвращает итератор обновлений статусов ордеров.
+        """
+        from tinkoff.invest.schemas import OrdersStreamRequest
+        
+        request = OrdersStreamRequest(account_id=account_id)
+        return self._client.orders_stream.orders_stream(request)
 
     # -- Представления ----------------------------------------------------
 

@@ -538,6 +538,236 @@ def clock(
 
 @app.command()
 @_guard
+def stream_quote(
+    tickers: list[str] = typer.Argument(..., help="Тикеры инструментов"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате"),
+) -> None:
+    """Живой поток последних цен по тикерам (#8)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        # Получаем FIGI для всех тикеров
+        figis = []
+        for ticker in tickers:
+            try:
+                figi = br.figi(ticker)
+                figis.append(figi)
+            except Exception as e:
+                console.print(f"[red]Ошибка для {ticker}: {e}[/red]")
+        
+        if not figis:
+            _fail("Не удалось получить FIGI ни для одного тикера")
+        
+        if not json_output:
+            console.print(f"[green]Запуск стрима last prices для {len(figis)} инструментов[/green]")
+            console.print("[dim]Нажмите Ctrl+C для остановки[/dim]\n")
+        
+        # Запускаем стрим
+        stream = br.stream_quotes(figis)
+        
+        try:
+            for response in stream:
+                # Фильтруем только данные last_price (не подписки)
+                if response.last_price:
+                    lp = response.last_price
+                    if json_output:
+                        print_json({
+                            "figi": lp.figi,
+                            "price": str(lp.price),
+                            "time": str(lp.time),
+                        }, contour=settings.contour.value, account="")
+                    else:
+                        console.print(f"[cyan]{lp.figi}[/cyan] | [green]{lp.price}[/green] | {lp.time}")
+        except KeyboardInterrupt:
+            if not json_output:
+                console.print("\n[yellow]Стрим остановлен[/yellow]")
+
+
+@app.command()
+@_guard
+def stream_trades(
+    tickers: list[str] = typer.Argument(..., help="Тикеры инструментов"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате"),
+) -> None:
+    """Поток сделок: цена, объём, агрессор (#9)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        # Получаем FIGI для всех тикеров
+        figis = []
+        for ticker in tickers:
+            try:
+                figi = br.figi(ticker)
+                figis.append(figi)
+            except Exception as e:
+                console.print(f"[red]Ошибка для {ticker}: {e}[/red]")
+        
+        if not figis:
+            _fail("Не удалось получить FIGI ни для одного тикера")
+        
+        if not json_output:
+            console.print(f"[green]Запуск стрима trades для {len(figis)} инструментов[/green]")
+            console.print("[dim]Нажмите Ctrl+C для остановки[/dim]\n")
+        
+        # Запускаем стрим
+        stream = br.stream_trades(figis)
+        
+        try:
+            for response in stream:
+                # Фильтруем только данные trade (не подписки)
+                if response.trade:
+                    trade = response.trade
+                    direction = "BUY" if trade.direction == 1 else "SELL" if trade.direction == 2 else "?"
+                    
+                    if json_output:
+                        print_json({
+                            "figi": trade.figi,
+                            "price": str(trade.price),
+                            "quantity": trade.quantity,
+                            "direction": direction,
+                            "time": str(trade.time),
+                        }, contour=settings.contour.value, account="")
+                    else:
+                        color = "green" if direction == "BUY" else "red"
+                        console.print(
+                            f"[cyan]{trade.figi}[/cyan] | "
+                            f"[{color}]{direction}[/{color}] | "
+                            f"[yellow]{trade.price}[/yellow] x {trade.quantity} | "
+                            f"{trade.time}"
+                        )
+        except KeyboardInterrupt:
+            if not json_output:
+                console.print("\n[yellow]Стрим остановлен[/yellow]")
+
+
+@app.command()
+@_guard
+def stream_orders(
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
+) -> None:
+    """Подписка на статусы заявок (#26 из TODO.md).
+    
+    Живой поток обновлений статусов ордеров: филл, частичное исполнение, отмена.
+    """
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        if json_output:
+            print_json(data={"status": "streaming", "account": account.id}, 
+                      contour=settings.contour.value, account=account.id)
+        else:
+            console.print(f"\n[bold]Стрим ордеров для счёта {account.id}[/bold]")
+            console.print("[dim]Ctrl+C для остановки[/dim]\n")
+        
+        try:
+            for update in br.stream_orders(account.id):
+                if json_output:
+                    print_json(data={
+                        "order_id": update.order_id,
+                        "status": str(update.execution_report_status),
+                        "filled": update.lots_executed,
+                        "timestamp": str(update.order_request_date),
+                    }, contour=settings.contour.value, account=account.id)
+                else:
+                    status = update.execution_report_status.name
+                    console.print(f"[cyan]{update.order_id}[/cyan] [yellow]{status}[/yellow] "
+                                f"заполнено: {update.lots_executed}")
+        except KeyboardInterrupt:
+            if not json_output:
+                console.print("\n[yellow]Стрим остановлен[/yellow]")
+            raise typer.Exit(0) from None
+
+
+@app.command()
+@_guard
+def flatten(
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
+) -> None:
+    """Закрыть все позиции и ждать исполнения (#35 из TODO.md).
+    
+    Отправляет рыночные заявки на закрытие всех открытых позиций
+    и ждёт их исполнения.
+    """
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        if not json_output:
+            console.print(f"\n[bold]Закрытие всех позиций для счёта {account.id}[/bold]")
+        
+        result = br.flatten_all_and_wait(account.id)
+        
+        if json_output:
+            print_json(data=result, contour=settings.contour.value, account=account.id)
+        else:
+            console.print(f"\n[green]✓ Закрыто позиций: {result['closed_positions']}[/green]")
+            if result['errors']:
+                console.print(f"[red]Ошибки: {len(result['errors'])}[/red]")
+                for err in result['errors']:
+                    console.print(f"  • {err}")
+
+
+@app.command()
+@_guard
+def stream_orderbook(
+    ticker: str = typer.Argument(..., help="Тикер инструмента"),
+    depth: int = typer.Option(10, "--depth", "-d", help="Глубина стакана"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате"),
+) -> None:
+    """Поток изменений стакана (#10)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    with _open_broker(settings) as br:
+        try:
+            figi = br.figi(ticker)
+        except Exception as e:
+            _fail(f"Не удалось получить FIGI для {ticker}: {e}")
+        
+        if not json_output:
+            console.print(f"[green]Запуск стрима orderbook для {ticker} (depth={depth})[/green]")
+            console.print("[dim]Нажмите Ctrl+C для остановки[/dim]\n")
+        
+        # Запускаем стрим
+        stream = br.stream_orderbook(figi, depth)
+        
+        try:
+            for response in stream:
+                # Фильтруем только данные orderbook (не подписки)
+                if response.orderbook:
+                    ob = response.orderbook
+                    
+                    if json_output:
+                        print_json({
+                            "figi": ob.figi,
+                            "depth": ob.depth,
+                            "is_consistent": ob.is_consistent,
+                            "bids": [[str(p.price), p.quantity] for p in ob.bids],
+                            "asks": [[str(p.price), p.quantity] for p in ob.asks],
+                            "time": str(ob.time),
+                        }, contour=settings.contour.value, account="")
+                    else:
+                        console.print(f"\n[cyan]{ob.figi}[/cyan] | depth={ob.depth} | {ob.time}")
+                        console.print("[red]Asks (продажи):[/red]")
+                        for ask in reversed(ob.asks[:5]):  # Показываем топ-5
+                            console.print(f"  {ask.price} x {ask.quantity}")
+                        console.print("[green]Bids (покупки):[/green]")
+                        for bid in ob.bids[:5]:  # Показываем топ-5
+                            console.print(f"  {bid.price} x {bid.quantity}")
+        except KeyboardInterrupt:
+            if not json_output:
+                console.print("\n[yellow]Стрим остановлен[/yellow]")
+
+
+@app.command()
+@_guard
 def change_mode(
     contour: str = typer.Argument(..., help="Контур: sandbox или live"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение для LIVE"),
