@@ -401,6 +401,58 @@ f"варианты: {available}"
         )
         return list(resp.operations)
 
+    def get_fees(
+        self,
+        account_id: str,
+        from_: Optional[Any] = None,
+        to: Optional[Any] = None,
+    ) -> dict:
+        """Получить итог комиссий за период (#38 из TODO.md)."""
+        from .render import money_to_float
+        
+        # Получаем все операции за период
+        ops = self.operations(account_id=account_id, from_=from_, to=to)
+        
+        # Фильтруем только операции с комиссиями
+        fee_operations = []
+        for op in ops:
+            op_type = getattr(op, 'operation_type', None)
+            if op_type is None:
+                continue
+            
+            # Получаем название типа операции
+            op_type_name = getattr(op_type, 'name', str(op_type))
+            
+            # Проверяем, является ли это операцией комиссии
+            if op_type_name in ('BROKER_FEE', 'SERVICE_FEE', 'COMMISSION'):
+                fee_operations.append(op)
+        
+        # Суммируем комиссии по валютам
+        fees_by_currency = {}
+        total_fees = 0.0
+        
+        for op in fee_operations:
+            # Получаем сумму операции (комиссии обычно отрицательные)
+            payment = getattr(op, 'payment', None)
+            if payment is None:
+                continue
+            
+            amount = money_to_float(payment)
+            currency = getattr(op, 'currency', 'RUB')
+            
+            if currency not in fees_by_currency:
+                fees_by_currency[currency] = 0.0
+            
+            fees_by_currency[currency] += abs(amount)  # Берём абсолютное значение
+            total_fees += abs(amount)
+        
+        return {
+            'total_fees': total_fees,
+            'fees_by_currency': fees_by_currency,
+            'operations_count': len(fee_operations),
+            'operations': fee_operations,
+        }
+
     # -- Песочница: пополнение --------------------------------------------
 
     def payin(self, account_id: str, amount: float) -> Any:

@@ -277,6 +277,80 @@ def trades(
             console.print(table)
 
 
+
+@app.command()
+@_guard
+def fees(
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Начальная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
+    to_date: Optional[str] = typer.Option(
+        None, "--to", help="Конечная дата (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS)"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON формате")
+) -> None:
+    """Итог комиссий за период (#38 из TODO.md)."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    
+    # Парсинг дат
+    now = datetime.now(timezone.utc)
+    if to_date:
+        try:
+            if "T" in to_date:
+                to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+            else:
+                to_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(f"неверный формат --to: {to_date}", code=2)
+    else:
+        to_dt = now
+    
+    if from_date:
+        try:
+            if "T" in from_date:
+                from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            else:
+                from_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _fail(f"неверный формат --from: {from_date}", code=2)
+    else:
+        # По умолчанию - последние 30 дней
+        from_dt = to_dt - timedelta(days=30)
+    
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        # Получаем комиссии
+        fees_info = br.get_fees(
+            account_id=account.id,
+            from_=from_dt,
+            to=to_dt,
+        )
+        
+        if json_output:
+            result = {
+                "from": from_dt.isoformat(),
+                "to": to_dt.isoformat(),
+                "total_fees": fees_info["total_fees"],
+                "fees_by_currency": fees_info["fees_by_currency"],
+                "operations_count": fees_info["operations_count"],
+            }
+            print_json(data=result, contour=settings.contour.value, account=account.id)
+        else:
+            console.print("\n[bold]Комиссии за период[/bold]")
+            from_str = from_dt.strftime('%Y-%m-%d %H:%M')
+            to_str = to_dt.strftime('%Y-%m-%d %H:%M')
+            console.print(f"Период: {from_str} — {to_str}")
+            console.print(f"Операций с комиссиями: {fees_info['operations_count']}")
+            
+            console.print("\n[bold]Итого по валютам:[/bold]")
+            for currency, amount in fees_info['fees_by_currency'].items():
+                console.print(f"  {currency}: {amount:.2f}")
+            
+            console.print(f"\n[bold]Общая сумма: {fees_info['total_fees']:.2f}[/bold]")
+
+
 @app.command()
 @_guard
 def clock(
