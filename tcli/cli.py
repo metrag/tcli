@@ -2150,10 +2150,11 @@ def account_select() -> None:
         selected = accounts[choice - 1]
         account_name = selected.name or selected.id
         
-        # Сохранить в .env
-        set_env_value("SANDBOX_ACCOUNT_NAME", account_name)
+        # Сохранить в .env с правильным ключом для контура
+        account_key = settings.account_name_key
+        set_env_value(account_key, account_name)
         console.print(f"[green]выбран счёт:[/green] {account_name}")
-        console.print("[dim]сохранено в .env как SANDBOX_ACCOUNT_NAME[/dim]")
+        console.print(f"[dim]сохранено в .env как {account_key}[/dim]")
         log_event("account_selected", account_id=selected.id, account_name=account_name)
 
 

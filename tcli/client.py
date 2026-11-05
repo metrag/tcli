@@ -219,8 +219,8 @@ class Broker:
                 f"счёт «{self._settings.account_override}» не найден; есть: {available}"
             )
             return matched[0]
-        # Приоритет 2: SANDBOX_ACCOUNT_NAME из .env
-        name = self._settings.sandbox_account_name
+        # Приоритет 2: account_name из .env (с учётом контура)
+        name = self._settings.account_name
         if name:
             matched = [a for a in accounts if a.name == name]
             if not matched:
@@ -230,9 +230,10 @@ class Broker:
         if len(accounts) == 1:
             return accounts[0]
         available = ", ".join(a.name or a.id for a in accounts)
+        contour_key = self._settings.account_name_key
         raise AmbiguousAccountError(
-            f"несколько счетов — задайте SANDBOX_ACCOUNT_NAME в .env или используйте --account; "
-f"варианты: {available}"
+            f"несколько счетов — задайте {contour_key} в .env или используйте --account; "
+            f"варианты: {available}"
         )
 
     def create_account(self, name: str = "") -> Any:

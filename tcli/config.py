@@ -34,7 +34,8 @@ def mask_token(token: str) -> str:
 class Settings:
     sandbox_token: str = ""  # Для песочницы
     main_token: str = ""  # Для боевого контура
-    sandbox_account_name: str = ""
+    sandbox_account_name: str = ""  # Deprecated, для обратной совместимости
+    live_account_name: str = ""  # Для боевого контура
     account_override: str = ""  # Глобальный флаг --account (#27)
     contour: Contour = Contour.SANDBOX
     env_path: Path = field(default_factory=lambda: ENV_PATH)
@@ -54,13 +55,31 @@ class Settings:
         contour_str = _get("TCLI_CONTOUR") or "SANDBOX"
         contour = Contour(contour_str) if contour_str in ("SANDBOX", "LIVE") else Contour.SANDBOX
 
+        # Читаем имена аккаунтов с fallback для обратной совместимости
+        live_account_name = _get("LIVE_ACCOUNT_NAME") or _get("SANDBOX_ACCOUNT_NAME")
+        sandbox_account_name = _get("SANDBOX_ACCOUNT_NAME")
+
         return cls(
             sandbox_token=sandbox_token,
             main_token=main_token,
-            sandbox_account_name=_get("SANDBOX_ACCOUNT_NAME"),
+            sandbox_account_name=sandbox_account_name,
+            live_account_name=live_account_name,
             contour=contour,
             env_path=path,
         )
+
+    @property
+    def account_name(self) -> str:
+        """Имя аккаунта в зависимости от контура."""
+        if self.contour == Contour.LIVE:
+            return self.live_account_name
+        else:
+            return self.sandbox_account_name
+
+    @property
+    def account_name_key(self) -> str:
+        """Ключ для записи в .env в зависимости от контура."""
+        return "LIVE_ACCOUNT_NAME" if self.contour == Contour.LIVE else "SANDBOX_ACCOUNT_NAME"
 
     @property
     def token(self) -> str:
