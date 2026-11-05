@@ -1330,6 +1330,7 @@ tcli is-market-open SBER --json
 
 Большинство команд с выводом данных поддерживают флаг `--json` для структурированного вывода:
 
+**Основные команды:**
 - `status --json`
 - `positions --json`
 - `orders --json`
@@ -1340,23 +1341,53 @@ tcli is-market-open SBER --json
 - `instruments --json`
 - `watchlist --json`
 
+**P0 команды (стакан, статусы, заявки):**
+- `orderbook --json`
+- `trading-status --json`
+- `sessions --json`
+- `order-info --json`
+- `stop-order-list --json`
+
+**P0 команды (управление позициями):**
+- `close --json`
+- `close-all --json`
+- `cancel-all --json`
+- `stop-order-cancel --json`
+- `free-cash --json`
+- `has-position --json`
+- `is-market-open --json`
+
 ### `--no-prompt` — Неинтерактивный режим
 
 Команды с подтверждениями поддерживают флаг `--no-prompt` для работы в скриптах:
 
+**Основные команды:**
 - `change-mode live --no-prompt`
 - `order-buy SBER 1 --no-prompt`
 - `order-sell SBER 1 --no-prompt`
 - `account-rm Main --no-prompt`
 
+**P0 команды:**
+- `close SBER --no-prompt`
+- `close-all --no-prompt`
+- `cancel-all --no-prompt`
+- `stop-order-cancel ID --no-prompt`
+
 ### `--yes`, `-y` — Пропустить подтверждение
 
 Альтернатива `--no-prompt` для некоторых команд:
 
+**Основные команды:**
 - `change-mode live --yes`
 - `order-buy SBER 1 --yes`
 - `order-sell SBER 1 --yes`
 - `account-rm Main --yes`
+
+**P0 команды:**
+- `close SBER --yes`
+- `close-all --yes`
+- `cancel-all --yes`
+- `stop-order-cancel ID --yes`
 
 ---
 
