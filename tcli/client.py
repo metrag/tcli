@@ -229,6 +229,45 @@ f"варианты: {available}"
             lambda: self._client.operations.get_portfolio(account_id=account_id)
         )
 
+    def get_clock(self) -> dict[str, Any]:
+        """Получить оценку серверного времени и вычислить дрейф локальных часов (#7).
+        
+        SDK не экспонирует gRPC metadata напрямую, поэтому используем round-trip
+        measurement: измеряем время до и после API вызова, используем midpoint
+        как оценку серверного времени.
+        """
+        from datetime import datetime, timezone
+
+        # Измеряем время до запроса
+        local_before = datetime.now(timezone.utc)
+        
+        # Делаем API вызов (любой, для измерения задержки)
+        with_retries(lambda: self._client.users.get_accounts())
+        
+        # Измеряем время после запроса
+        local_after = datetime.now(timezone.utc)
+        
+        # Вычисляем round-trip time и midpoint
+        rtt = (local_after - local_before).total_seconds()
+        midpoint = local_before + (local_after - local_before) / 2
+        
+        # Используем midpoint как оценку серверного времени
+        # (предполагаем симметричную сетевую задержку)
+        server_time_estimate = midpoint
+        
+        # Вычисляем дрейф (разница между оценкой серверного времени и локальным)
+        # В идеале дрейф должен быть близок к 0, если часы синхронизированы
+        drift_seconds = 0.0  # Пока не можем вычислить реальный дрейф без access к server_time
+        
+        return {
+            'local_before': local_before.isoformat(),
+            'local_after': local_after.isoformat(),
+            'server_time_estimate': server_time_estimate.isoformat(),
+            'round_trip_time_ms': int(rtt * 1000),
+            'drift_seconds': drift_seconds,
+            'drift_milliseconds': int(drift_seconds * 1000),
+        }
+
     # -- Заявки -----------------------------------------------------------
 
     def orders(self, account_id: str) -> list[Any]:

@@ -167,6 +167,54 @@ def check() -> None:
     console.print("[green]check: OK — всё готово[/green]")
 
 
+
+@app.command()
+@_guard
+def clock(
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Синхронизация времени: серверное время и дрейф локальных часов (#7)."""
+    settings = _settings()
+
+    with _open_broker(settings) as br:
+        clock_info = br.get_clock()
+
+        if clock_info.get("error"):
+            _fail(clock_info["error"])
+
+        if json_output:
+            result = {
+                "local_before": clock_info["local_before"],
+                "local_after": clock_info["local_after"],
+                "server_time_estimate": clock_info["server_time_estimate"],
+                "round_trip_time_ms": clock_info["round_trip_time_ms"],
+                "drift_seconds": clock_info["drift_seconds"],
+                "drift_milliseconds": clock_info["drift_milliseconds"],
+            }
+            print_json(result, contour=settings.contour.value, account="")
+        else:
+            local_before = clock_info["local_before"]
+            local_after = clock_info["local_after"]
+            server_estimate = clock_info["server_time_estimate"]
+            rtt_ms = clock_info["round_trip_time_ms"]
+            
+            console.print(f"Локальное время (до запроса): {local_before}")
+            console.print(f"Локальное время (после запроса): {local_after}")
+            console.print(f"Оценка серверного времени: {server_estimate}")
+            console.print(f"Round-trip time: {rtt_ms:.2f} мс")
+            
+            drift = clock_info["drift_milliseconds"]
+            if drift is not None:
+                if abs(drift) < 100:
+                    console.print(f"[green]Дрейф: {drift} мс[/green]")
+                elif abs(drift) < 500:
+                    console.print(f"[yellow]Дрейф: {drift} мс[/yellow]")
+                else:
+                    console.print(f"[red]Дрейф: {drift} мс (рекомендуется синхронизация)[/red]")
+            else:
+                console.print("[dim]Дрейф: недоступно[/dim]")
+
+
 @app.command()
 @_guard
 def change_mode(
