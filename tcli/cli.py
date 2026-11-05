@@ -1768,6 +1768,58 @@ def stop_order_place(
         )
 
 
+@app.command(name="stop-order-cancel-all")
+@_guard
+def stop_order_cancel_all(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Отменить все стоп-заявки."""
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    with _open_broker(settings) as br:
+        account = br.pick_account()
+        
+        # Получаем список активных стоп-заявок для подсчёта
+        active_stops = br.stop_orders(account.id)
+        count = len(active_stops)
+        
+        if count == 0:
+            if json_output:
+                console.print_json(data={"cancelled_count": 0, "cancelled_ids": []})
+            else:
+                console.print("активных стоп-заявок нет")
+            raise typer.Exit(0)
+        
+        if not yes and not no_prompt:
+            console.print(f"\n[bold]Отмена всех стоп-заявок:[/bold] {count} шт.")
+            console.print(f"  Счёт: {account.name or account.id}")
+            console.print(f"  Контур: [yellow]{br.contour.value}[/yellow]")
+            confirm = typer.confirm("Подтвердить отмену?")
+            if not confirm:
+                console.print("[red]Отменено[/red]")
+                raise typer.Exit(1)
+        
+        # Отменяем все стоп-заявки
+        cancelled = br.cancel_all_stop_orders(account.id)
+        cancelled_count = len(cancelled)
+        cancelled_ids = [str(c.stop_order_id) for c in cancelled if hasattr(c, "stop_order_id")]
+        
+        if json_output:
+            result = {
+                "cancelled_count": cancelled_count,
+                "cancelled_ids": cancelled_ids
+            }
+            console.print_json(data=result)
+        else:
+            console.print(f"[green]отменено стоп-заявок:[/green] {cancelled_count} из {count}")
+            for stop_id in cancelled_ids:
+                console.print(f"  ✓ {stop_id}")
+        
+        log_event("stop_orders_cancel_all", cancelled_count=cancelled_count, total_count=count)
+
+
 @app.command()
 @_guard
 def free_cash(
