@@ -1673,6 +1673,103 @@ def stop_order_cancel(
 
 @app.command()
 @_guard
+def stop_order_place(
+    ticker: str = typer.Argument(..., help="Тикер или FIGI инструмента"),
+    lots: int = typer.Argument(..., help="Количество лотов"),
+    stop_price: float = typer.Option(..., "--stop-price", help="Стоп-цена"),
+    price: Optional[float] = typer.Option(
+        None, "--price", help="Лимитная цена (иначе рыночная после активации)"
+    ),
+    direction: str = typer.Option(..., "--direction", help="Направление: BUY или SELL"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Не запрашивать подтверждение"),
+    no_prompt: bool = typer.Option(False, "--no-prompt", help="Неинтерактивный режим (без подтверждений)"),
+    json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
+) -> None:
+    """Разместить стоп-заявку."""
+    if lots <= 0:
+        _fail("количество лотов должно быть больше 0", code=2)
+    
+    direction_upper = direction.upper()
+    if direction_upper not in ("BUY", "SELL"):
+        _fail("направление должно быть BUY или SELL", code=2)
+    
+    if stop_price <= 0:
+        _fail("стоп-цена должна быть больше 0", code=2)
+    
+    settings = _settings()
+    header_line(settings.masked(), settings.contour_label(), settings.env_path.exists())
+    with _open_broker(settings) as br:
+        from tinkoff.invest.schemas import OrderDirection, Quotation
+        
+        account = br.pick_account()
+        figi = br.figi(ticker)
+        
+        if direction_upper == "BUY":
+            order_direction = OrderDirection.ORDER_DIRECTION_BUY
+        else:
+            order_direction = OrderDirection.ORDER_DIRECTION_SELL
+        
+        stop_price_str = fmt_money(stop_price)
+        price_str = fmt_money(price) if price is not None else "рыночная после активации"
+        
+        if not yes and not no_prompt:
+            console.print(f"\n[bold]Стоп-заявка ({direction_upper}):[/bold] {ticker} × {lots} лот(ов)")
+            console.print(f"  Счёт: {account.name or account.id}")
+            console.print(f"  Стоп-цена: {stop_price_str}")
+            console.print(f"  Цена исполнения: {price_str}")
+            console.print(f"  Контур: [yellow]{br.contour.value}[/yellow]")
+            confirm = typer.confirm("Подтвердить стоп-заявку?")
+            if not confirm:
+                console.print("[red]Отменено[/red]")
+                raise typer.Exit(1)
+        
+        stop_price_quotation = Quotation(
+            units=int(stop_price),
+            nano=int(round((stop_price - int(stop_price)) * 1e9))
+        )
+        
+        price_quotation = None
+        if price is not None:
+            price_quotation = Quotation(units=int(price), nano=int(round((price - int(price)) * 1e9)))
+        
+        resp = br.place_stop_order(
+            account_id=account.id,
+            figi=figi,
+            direction=order_direction,
+            quantity=lots,
+            stop_price=stop_price_quotation,
+            price=price_quotation,
+        )
+        
+        stop_order_id = getattr(resp, "stop_order_id", "")
+        
+        if json_output:
+            result = {
+                "stop_order_id": stop_order_id,
+                "ticker": ticker,
+                "figi": figi,
+                "direction": direction_upper,
+                "lots": lots,
+                "stop_price": str(stop_price_quotation),
+                "price": str(price_quotation) if price_quotation else "market",
+            }
+            console.print_json(data=result)
+        else:
+            console.print("\n[green]стоп-заявка размещена[/green]")
+            console.print(f"  stop_order_id: {stop_order_id}")
+            console.print(f"  figi: {figi}")
+        
+        log_event(
+            "stop_order_placed",
+            stop_order_id=stop_order_id,
+            ticker=ticker,
+            lots=lots,
+            direction=direction_upper
+        )
+
+
+@app.command()
+@_guard
 def free_cash(
     json_output: bool = typer.Option(False, "--json", help="Вывод в JSON"),
 ) -> None:
